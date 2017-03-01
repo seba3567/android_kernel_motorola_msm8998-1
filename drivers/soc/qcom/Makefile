@@ -85,12 +85,47 @@ ifdef CONFIG_MSM_SUBSYSTEM_RESTART
        obj-y += ramdump.o
        obj-y += microdump_collector.o
 endif
+<<<<<<< HEAD
 obj-$(CONFIG_MSM_SYSMON_COMM) += sysmon.o sysmon-qmi.o
 obj-$(CONFIG_MSM_BGRSB) += bg_rsb.o
 obj-$(CONFIG_MSM_BGCOM_INTERFACE) += bgcom_interface.o
 obj-$(CONFIG_MSM_JTAGV8) += jtagv8.o jtagv8-etm.o
 obj-$(CONFIG_QCOM_COMMAND_DB) += cmd-db.o
 obj-$(CONFIG_MSM_QBT1000) += qbt1000.o
+=======
+
+obj-$(CONFIG_QPNP_HAPTIC) += qpnp-haptic.o
+obj-$(CONFIG_QCOM_GSBI)	+=	qcom_gsbi.o
+obj-$(CONFIG_QCOM_CPUSS_DUMP) += cpuss_dump.o
+obj-$(CONFIG_QPNP_PBS) += qpnp-pbs.o
+obj-$(CONFIG_QCOM_PM)	+=	spm.o
+obj-$(CONFIG_QCOM_SMD) +=	smd.o
+obj-$(CONFIG_QCOM_SMD_RPM)	+= smd-rpm.o
+obj-$(CONFIG_QCOM_SMEM) +=	smem.o
+obj-$(CONFIG_MSM_SPM) += msm-spm.o spm_devices.o
+CFLAGS_scm.o :=$(call as-instr,.arch_extension sec,-DREQUIRES_SEC=1)
+
+obj-$(CONFIG_QCOM_SCM_ERRATA) += scm-errata.o
+obj-$(CONFIG_QCOM_SCM)  +=      scm.o scm-boot.o
+obj-$(CONFIG_QCOM_SCM_QCPE)  += scm_qcpe.o
+obj-$(CONFIG_QCOM_SCM_XPU) += scm-xpu.o
+obj-$(CONFIG_QCOM_WATCHDOG_V2) += watchdog_v2.o
+obj-$(CONFIG_QCOM_WATCHDOG_CTX_PRINT) += watchdog_cpu_ctx.o
+obj-$(CONFIG_QCOM_MEMORY_DUMP) += memory_dump.o
+obj-$(CONFIG_QCOM_MEMORY_DUMP_V2) += memory_dump_v2.o
+obj-$(CONFIG_QCOM_MINIDUMP) += msm_minidump.o
+obj-$(CONFIG_QCOM_DCC) += dcc.o
+obj-$(CONFIG_QCOM_EARLY_DOMAIN)	+= early_dom.o
+obj-$(CONFIG_QCOM_COMMON_LOG) += common_log.o
+obj-$(CONFIG_QCOM_IRQ_HELPER) += irq-helper.o
+obj-$(CONFIG_TRACER_PKT)	+=	tracer_pkt.o
+obj-$(CONFIG_ICNSS) += icnss.o wlan_firmware_service_v01.o icnss_utils.o
+obj-$(CONFIG_SOC_BUS)  +=      socinfo.o
+obj-$(CONFIG_QCOM_BUS_SCALING) += msm_bus/
+obj-$(CONFIG_MSM_SERVICE_NOTIFIER) += service-notifier.o
+obj-$(CONFIG_MSM_SECURE_BUFFER) += secure_buffer.o
+obj-$(CONFIG_MSM_MPM_OF) += mpm-of.o
+>>>>>>> 1606e83787b9 (soc:watchdog cpu context print)
 obj-$(CONFIG_MSM_EVENT_TIMER) += event_timer.o
 obj-$(CONFIG_MSM_IDLE_STATS)	+= lpm-stats.o
 obj-$(CONFIG_QCOM_DCC) += dcc.o

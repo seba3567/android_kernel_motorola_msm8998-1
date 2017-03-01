@@ -31,7 +31,11 @@
 #include <soc/qcom/memory_dump.h>
 #include <soc/qcom/minidump.h>
 #include <soc/qcom/watchdog.h>
+<<<<<<< HEAD
 #include <linux/dma-mapping.h>
+=======
+#include "watchdog_cpu_ctx.h"
+>>>>>>> 1606e83787b9 (soc:watchdog cpu context print)
 
 #define MODULE_NAME "msm_watchdog"
 #define WDT0_ACCSCSSNBARK_INT 0
@@ -94,6 +98,8 @@ struct msm_watchdog_data {
 	bool timer_expired;
 	bool user_pet_complete;
 	unsigned int scandump_size;
+	phys_addr_t cpu_ctx_addr;
+	size_t cpu_ctx_size_percpu;
 };
 
 /*
@@ -623,6 +629,7 @@ static void configure_scandump(struct msm_watchdog_data *wdog_dd)
 	struct msm_dump_entry dump_entry;
 	struct msm_dump_data *cpu_data;
 	int cpu;
+<<<<<<< HEAD
 	static dma_addr_t dump_addr;
 	static void *dump_vaddr;
 
@@ -658,6 +665,98 @@ static void configure_scandump(struct msm_watchdog_data *wdog_dd)
 					  dump_vaddr,
 					  dump_addr);
 			devm_kfree(wdog_dd->dev, cpu_data);
+=======
+	void *cpu_buf;
+	struct {
+		unsigned addr;
+		int len;
+	} cmd_buf;
+	struct scm_desc desc = {0};
+
+	if (MSM_DUMP_MAJOR(msm_dump_table_version()) == 1) {
+		wdog_dd->scm_regsave = (void *)__get_free_page(GFP_KERNEL);
+		if (wdog_dd->scm_regsave) {
+			/* scm_regsave may be a phys address > 4GB */
+			desc.args[0] = virt_to_phys(wdog_dd->scm_regsave);
+			cmd_buf.addr = virt_to_phys(wdog_dd->scm_regsave);
+			desc.args[1] = cmd_buf.len  = PAGE_SIZE;
+			desc.arginfo = SCM_ARGS(2, SCM_RW, SCM_VAL);
+
+			if (!is_scm_armv8())
+				ret = scm_call(SCM_SVC_UTIL,
+					       SCM_SET_REGSAVE_CMD, &cmd_buf,
+					       sizeof(cmd_buf), NULL, 0);
+			else
+				ret = scm_call2(SCM_SIP_FNID(SCM_SVC_UTIL,
+						SCM_SET_REGSAVE_CMD), &desc);
+			if (ret)
+				pr_err("Setting register save address failed.\n"
+				       "Registers won't be dumped on a dog "
+				       "bite\n");
+			cpu_dump_entry.id = MSM_CPU_CTXT;
+			cpu_dump_entry.start_addr =
+					virt_to_phys(wdog_dd->scm_regsave);
+			cpu_dump_entry.end_addr = cpu_dump_entry.start_addr +
+						  PAGE_SIZE;
+			ret = msm_dump_tbl_register(&cpu_dump_entry);
+			if (ret)
+				pr_err("Setting cpu dump region failed\n"
+				"Registers wont be dumped during cpu hang\n");
+		} else {
+			pr_err("Allocating register save space failed\n"
+			       "Registers won't be dumped on a dog bite\n");
+			/*
+			 * No need to bail if allocation fails. Simply don't
+			 * send the command, and the secure side will reset
+			 * without saving registers.
+			 */
+		}
+	} else {
+		phys_addr_t cpu_buf_phys;
+		size_t buf_size_percpu;
+
+		cpu_data = kzalloc(sizeof(struct msm_dump_data) *
+				   num_present_cpus(), GFP_KERNEL);
+		if (!cpu_data) {
+			pr_err("cpu dump data structure allocation failed\n");
+			goto out0;
+		}
+		if (wdog_dd->cpu_ctx_addr && wdog_dd->cpu_ctx_size_percpu) {
+			cpu_buf_phys = wdog_dd->cpu_ctx_addr;
+			buf_size_percpu = wdog_dd->cpu_ctx_size_percpu;
+		} else {
+			cpu_buf = kzalloc(MAX_CPU_CTX_SIZE * num_present_cpus(),
+					  GFP_KERNEL);
+			if (!cpu_buf) {
+				pr_err("cpu reg context space allocation failed\n");
+				goto out1;
+			}
+			cpu_buf_phys = virt_to_phys(cpu_buf);
+			buf_size_percpu = MAX_CPU_CTX_SIZE;
+		}
+
+		for_each_cpu(cpu, cpu_present_mask) {
+			cpu_data[cpu].addr = cpu_buf_phys +
+						cpu * buf_size_percpu;
+			/* Hack the dump data len to the sysdbg length only.
+			 * This is to avoid TZ Zero-initialize the whole
+			 * dump structure including the other header contents.
+			 */
+			cpu_data[cpu].len = MAX_CPU_CTX_SIZE;
+			snprintf(cpu_data[cpu].name, sizeof(cpu_data[cpu].name),
+				"KCPU_CTX%d", cpu);
+
+			dump_entry.id = MSM_DUMP_DATA_CPU_CTX + cpu;
+			dump_entry.addr = virt_to_phys(&cpu_data[cpu]);
+			ret = msm_dump_data_register(MSM_DUMP_TABLE_APPS,
+						     &dump_entry);
+			/*
+			 * Don't free the buffers in case of error since
+			 * registration may have succeeded for some cpus.
+			 */
+			if (ret)
+				pr_err("cpu %d reg dump setup failed\n", cpu);
+>>>>>>> 1606e83787b9 (soc:watchdog cpu context print)
 		}
 	}
 
@@ -871,6 +970,8 @@ static int msm_watchdog_probe(struct platform_device *pdev)
 	wdog_data = wdog_dd;
 	wdog_dd->dev = &pdev->dev;
 	platform_set_drvdata(pdev, wdog_dd);
+	msm_wdog_get_cpu_ctx(pdev, &wdog_dd->cpu_ctx_addr,
+				&wdog_dd->cpu_ctx_size_percpu);
 	cpumask_clear(&wdog_dd->alive_mask);
 	wdog_dd->watchdog_task = kthread_create(watchdog_kthread, wdog_dd,
 			"msm_watchdog");

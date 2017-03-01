@@ -558,6 +558,13 @@ config MSM_IPC_ROUTER_MHI_XPRT
 	depends on MSM_MHI
 	depends on IPC_ROUTER
 	bool "MSM MHI XPRT Layer"
+	  Library to send and receive QMI messages over IPC Router.
+	  This library provides interface functions to the kernel drivers
+	  to perform QMI message marshaling and transport them over IPC
+	  Router.
+
+config MSM_RPM_SMD
+	bool "RPM driver using SMD protocol"
 	help
 	  MHI Transport Layer that enables off-chip communication of
 	  IPC Router. When the MHI endpoint becomes available, this layer
@@ -640,7 +647,74 @@ config MSM_PIL
          Some peripherals need to be loaded into memory before they can be
          brought out of reset.
 
-         Say yes to support these devices.
+config QCOM_EARLY_DOMAIN
+	bool "Support for handoff of early domain services running in bootloader"
+
+menuconfig QCOM_SCM_XPU
+	bool "Qualcomm XPU configuration driver"
+	depends on QCOM_SCM
+
+if QCOM_SCM_XPU
+
+choice
+	prompt "XPU Violation Behavior"
+	default QCOM_XPU_ERR_FATAL
+
+config QCOM_XPU_ERR_FATAL
+	bool "Configure XPU violations as fatal errors"
+	help
+	 Select if XPU violations have to be configured as fatal errors.
+
+config QCOM_XPU_ERR_NONFATAL
+	bool "Configure XPU violations as non-fatal errors"
+	help
+	 Select if XPU violations have to be configured as non-fatal errors.
+
+endchoice
+
+endif
+
+config QCOM_SCM_ERRATA
+	depends on DEBUG_FS
+	depends on QCOM_SCM
+	bool "Support for enabling/disabling errata workarounds via debugfs"
+	help
+	  Exposes a debugfs interface intended for advanced system debugging
+	  where it may be desirable to enable or disable certain hardware
+	  errata workarounds at runtime.
+
+	  If unsure, say N.
+
+if ARCH_QCOM
+
+config QCOM_WATCHDOG_V2
+	bool "Qualcomm Watchdog Support"
+	help
+	  This enables the watchdog module. It causes kernel panic if the
+	  watchdog times out. It allows for detection of cpu hangs and
+	  deadlocks. It does not run during the bootup process, so it will
+	  not catch any early lockups.
+
+config QCOM_WATCHDOG_CTX_PRINT
+	bool "Print context dump saved by secure mode watchdog handler"
+	default n
+	depends on QCOM_WATCHDOG_V2
+	depends on QCOM_MEMORY_DUMP_V2
+	depends on PSTORE_RAM_ANNOTATION_APPEND
+	help
+	   After enabling this option, kernel will reserve bigger buffer
+	   for secure mode watchdog handler to save info. And kernel will
+	   try to print the info if it looks valid.
+	   If unsure, say N
+
+config QCOM_IRQ_HELPER
+	bool "QCOM Irq Helper"
+	help
+	  This enables the irq helper module. It exposes two APIs
+	  int irq_blacklist_on(void) and int irq_blacklist_off(void)
+	  to other kernel module.
+	  These two apis will be used to control the black list used
+	  by the irq balancer.
 
 config MSM_SYSMON_GLINK_COMM
        bool "MSM System Monitor communication support using GLINK transport"
