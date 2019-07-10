@@ -1761,18 +1761,17 @@ static int msm_spi_prepare_transfer_hardware(struct spi_master *master)
 	int resume_state = 0;
 
 	resume_state = pm_runtime_get_sync(dd->dev);
-	if (resume_state < 0)
-		goto spi_finalize;
-
+	if (resume_state < 0) {
 	/*
 	 * Counter-part of system-suspend when runtime-pm is not enabled.
 	 * This way, resume can be left empty and device will be put in
 	 * active mode only if client requests anything on the bus
 	 */
-	if (!pm_runtime_enabled(dd->dev))
-		resume_state = msm_spi_pm_resume_runtime(dd->dev);
-	if (resume_state < 0)
-		goto spi_finalize;
+		if (!pm_runtime_enabled(dd->dev))
+			resume_state = pm_runtime_force_resume(dd->dev);
+		if (resume_state < 0)
+			goto spi_finalize;
+	}
 	if (dd->suspended) {
 		resume_state = -EBUSY;
 		goto spi_finalize;
@@ -2734,16 +2733,18 @@ skip_dma_resources:
 	pm_runtime_enable(&pdev->dev);
 
 	dd->suspended = 1;
-	rc = spi_register_master(master);
-	if (rc)
-		goto err_probe_reg_master;
-
 	rc = sysfs_create_group(&(dd->dev->kobj), &dev_attr_grp);
 	if (rc) {
 		dev_err(&pdev->dev, "failed to create dev. attrs : %d\n", rc);
 		goto err_attrs;
 	}
+
+	rc = spi_register_master(master);
+	if (rc)
+		goto err_probe_reg_master;
+
 	rc = sysfs_create_file(&(dd->dev->kobj), &dev_attr_spi_qup_state.attr);
+
 	spi_debugfs_init(dd);
 
 	snprintf(boot_marker, sizeof(boot_marker),
@@ -2752,9 +2753,9 @@ skip_dma_resources:
 
 	return 0;
 
-err_attrs:
-	spi_unregister_master(master);
 err_probe_reg_master:
+	sysfs_remove_group(&pdev->dev.kobj, &dev_attr_grp);
+err_attrs:
 	pm_runtime_disable(&pdev->dev);
 err_probe_reqmem:
 err_probe_res:
@@ -2905,14 +2906,12 @@ static int msm_spi_remove(struct platform_device *pdev)
 
 	if (dd->dma_teardown)
 		dd->dma_teardown(dd);
-	pm_runtime_disable(&pdev->dev);
-	pm_runtime_set_suspended(&pdev->dev);
+	pm_runtime_force_suspend(&pdev->dev);
 	clk_put(dd->clk);
 	clk_put(dd->pclk);
 	msm_spi_clk_path_teardown(dd);
 	platform_set_drvdata(pdev, 0);
 	spi_unregister_master(master);
-	spi_master_put(master);
 
 	return 0;
 }

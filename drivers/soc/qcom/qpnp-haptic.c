@@ -1899,7 +1899,8 @@ static int qpnp_hap_auto_res_enable(struct qpnp_hap *hap, int enable)
 		return 0;
 	}
 
-	if (!hap->correct_lra_drive_freq && !auto_res_mode_qwd) {
+	if (!hap->lra_hw_auto_resonance && !hap->correct_lra_drive_freq
+		&& !auto_res_mode_qwd) {
 		pr_debug("correct_lra_drive_freq: %d auto_res_mode_qwd: %d\n",
 			hap->correct_lra_drive_freq, auto_res_mode_qwd);
 		return 0;
@@ -2052,6 +2053,9 @@ static int qpnp_hap_set(struct qpnp_hap *hap, bool on)
 	} else if (hap->play_mode == QPNP_HAP_BUFFER ||
 			hap->play_mode == QPNP_HAP_DIRECT) {
 		if (on) {
+			if (hap->module_en == on )
+				return 0;
+
 			rc = qpnp_hap_auto_res_enable(hap, 0);
 			if (rc < 0)
 				return rc;

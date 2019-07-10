@@ -265,6 +265,7 @@ struct fg_dt_props {
 	int	esr_timer_asleep[NUM_ESR_TIMERS];
 	int	rconn_mohms;
 	int	esr_clamp_mohms;
+	bool	cl_feedback;
 	int	cl_start_soc;
 	int	cl_max_temp;
 	int	cl_min_temp;
@@ -292,6 +293,10 @@ struct fg_dt_props {
 	int	ki_coeff_hi_dischg[KI_COEFF_SOC_LEVELS];
 	int	slope_limit_coeffs[SLOPE_LIMIT_NUM_COEFFS];
 	u8	batt_therm_coeffs[BATT_THERM_NUM_COEFFS];
+	int	*batt_therm_high_lut;
+	int	batt_therm_high_lut_len;
+	int	*batt_therm_low_lut;
+	int	batt_therm_low_lut_len;
 };
 
 /* parameters from battery profile */
@@ -301,6 +306,7 @@ struct fg_batt_props {
 	int		float_volt_uv;
 	int		vbatt_full_mv;
 	int		fastchg_curr_ma;
+	u8		profile_revision;
 };
 
 struct fg_cyc_ctr_data {
@@ -522,4 +528,5 @@ extern void fg_circ_buf_clr(struct fg_circ_buf *);
 extern int fg_circ_buf_avg(struct fg_circ_buf *, int *);
 extern int fg_circ_buf_median(struct fg_circ_buf *, int *);
 extern int fg_lerp(const struct fg_pt *, size_t, s32, s32 *);
+extern int fg_dma_mem_req(struct fg_chip *, bool);
 #endif

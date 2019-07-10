@@ -821,6 +821,22 @@ config INPUT_DRV2665_HAPTICS
 	  To compile this driver as a module, choose M here: the
 	  module will be called drv2665-haptics.
 
+config INPUT_SX9310
+        tristate "SX9310_SAR_sensor"
+        depends on I2C
+        default n
+        help
+          Say Y to enable the SAR detection application, if N here not to use the
+          this SAR sensor.
+
+config INPUT_SX933x
+        tristate "SX933x_SAR_sensor"
+        depends on I2C
+        default n
+        help
+          Say Y to enable the SAR detection application, if N here not to use the
+          this SAR sensor.
+
 config INPUT_DRV2667_HAPTICS
 	tristate "TI DRV2667 haptics support"
 	depends on INPUT && I2C
@@ -843,5 +859,30 @@ config INPUT_STMVL53L0
 
 	 To compile this driver as a module, choose M here: the
 	 module will be called stmvl53l0.
+
+config SENSORS_FPC_1020
+	tristate "fpc fingerprint sensor"
+	default n
+	help
+	  Say Y here if you wish to include support for finger print sensor.
+	  If unsure, say N.
+config INPUT_EGISTEC_FPS
+	tristate "Egistec FPS fingerprint sensor"
+	default n
+	help
+	 Say Y here if you wish to include support for EGIS finger print sensor.
+	 If unsure, say N.
+config STMVL53L1
+	tristate "STMVL53L1 support"
+	help
+	  Say Y here if you wish to include support for laser sensor driver.
+
+config INPUT_SX9310_TRIPLE
+	tristate "SX9310_SAR_sensor use triple channels"
+	depends on I2C
+	default n
+	help
+	  Say Y to enable the SAR detection application, if N here not to use the
+	  this SAR sensor.
 
 endif

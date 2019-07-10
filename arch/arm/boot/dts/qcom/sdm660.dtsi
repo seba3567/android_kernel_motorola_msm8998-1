@@ -864,7 +864,7 @@
 		reg = <0x1fe5040 0x28>;
 	};
 
-	qcom,bcl {
+	pm660_bcl: qcom,bcl {
 		compatible = "qcom,bcl";
 		qcom,bcl-enable;
 		qcom,bcl-framework-interface;
@@ -2114,10 +2114,6 @@
 		/* GPIO output to mss */
 		qcom,gpio-force-stop = <&smp2pgpio_ssr_smp2p_1_out 0 0>;
 		status = "ok";
-		qcom,mba-mem@0 {
-			compatible = "qcom,pil-mba-mem";
-			memory-region = <&pil_mba_mem>;
-		};
 	};
 
 	qcom,msm-rtb {
@@ -2384,7 +2380,6 @@
 		lanes-per-direction = <1>;
 		spm-level = <5>;
 
-		non-removable;
 		qcom,msm-bus,name = "ufs1";
 		qcom,msm-bus,num-cases = <12>;
 		qcom,msm-bus,num-paths = <2>;

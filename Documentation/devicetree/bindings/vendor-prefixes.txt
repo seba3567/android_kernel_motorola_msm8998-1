@@ -87,6 +87,7 @@ excito	Excito
 fcs	Fairchild Semiconductor
 firefly	Firefly
 focaltech	FocalTech Systems Co.,Ltd
+fpc	Fingerprint Cards
 fsl	Freescale Semiconductor
 GEFanuc	GE Fanuc Intelligent Platforms Embedded Systems, Inc.
 goodix	Goodix. Ltd.
@@ -150,6 +151,7 @@ mitsubishi	Mitsubishi Electric Corporation
 mosaixtech	Mosaix Technologies, Inc.
 moxa	Moxa
 mpl	MPL AG
+mmi	Motorola Mobility LLC (formerly Motorola Mobility, Inc.)
 msi	Micro-Star International Co. Ltd.
 mstar	MStar Semiconductor, Inc.
 mti	Imagination Technologies Ltd. (formerly MIPS Technologies Inc.)

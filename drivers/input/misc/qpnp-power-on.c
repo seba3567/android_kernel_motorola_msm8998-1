@@ -32,6 +32,7 @@
 #include <linux/regulator/of_regulator.h>
 #include <linux/input/qpnp-power-on.h>
 #include <linux/power_supply.h>
+#include <linux/time.h>
 
 #define PMIC_VER_8941           0x01
 #define PMIC_VERSION_REG        0x0105
@@ -90,6 +91,8 @@
 #define QPNP_PON_S3_DBC_CTL(pon)		((pon)->base + 0x75)
 #define QPNP_PON_SMPL_CTL(pon)			((pon)->base + 0x7F)
 #define QPNP_PON_TRIGGER_EN(pon)		((pon)->base + 0x80)
+#define QPNP_PON_PERPH_RB_SPARE(pon)		((pon)->base + 0x8C)
+#define QPNP_PON_DVDD_RB_SPARE(pon)		((pon)->base + 0x8D)
 #define QPNP_PON_XVDD_RB_SPARE(pon)		((pon)->base + 0x8E)
 #define QPNP_PON_SOFT_RB_SPARE(pon)		((pon)->base + 0x8F)
 #define QPNP_PON_SEC_ACCESS(pon)		((pon)->base + 0xD0)
@@ -228,7 +231,10 @@ module_param_named(
 	ship_mode_en, pon_ship_mode_en, int, 0600
 );
 
+int qpnp_pon_key_status;
+
 static struct qpnp_pon *sys_reset_dev;
+static struct qpnp_pon *shipmode_dev;
 static DEFINE_SPINLOCK(spon_list_slock);
 static LIST_HEAD(spon_dev_list);
 
@@ -359,6 +365,114 @@ int qpnp_pon_set_restart_reason(enum pon_restart_reason reason)
 	return rc;
 }
 EXPORT_SYMBOL(qpnp_pon_set_restart_reason);
+
+/**
+ * qpnp_pon_store_extra_reset_info - Store extra reset info in PMIC register.
+ *
+ * Returns = 0 if PMIC feature is not available or store restart reason
+ * successfully.
+ * Returns > 0 for errors
+ *
+ * This function is used to store extra reset info in PMIC spare register
+ * which can be preserved during reset.
+ */
+int qpnp_pon_store_extra_reset_info(u16 mask, u16 val)
+{
+	int rc = 0;
+	struct qpnp_pon *pon = sys_reset_dev;
+
+	if (!pon)
+		return 0;
+
+	if (mask & 0xFF) {
+		rc = qpnp_pon_masked_write(pon, QPNP_PON_DVDD_RB_SPARE(pon),
+					   (mask & 0xFF), (val & 0xFF));
+		if (rc) {
+			dev_err(&pon->pdev->dev,
+				"Failed to store extra reset info to 0x%x\n",
+				QPNP_PON_DVDD_RB_SPARE(pon));
+			return rc;
+		}
+	}
+
+	if (mask & 0xFF00) {
+		rc = qpnp_pon_masked_write(pon, QPNP_PON_XVDD_RB_SPARE(pon),
+				((mask >> 8) & 0xFF), ((val >> 8) & 0xFF));
+		if (rc) {
+			dev_err(&pon->pdev->dev,
+				"Failed to store extra reset info to 0x%x\n",
+				QPNP_PON_XVDD_RB_SPARE(pon));
+			return rc;
+		}
+	}
+
+	return rc;
+}
+EXPORT_SYMBOL(qpnp_pon_store_extra_reset_info);
+
+int qpnp_pon_store_shipmode_info(u16 mask, u16 val)
+{
+	int rc = 0;
+	u16 shipmode_info_reg;
+	int value;
+	struct qpnp_pon *pon = shipmode_dev;
+
+	if (!pon)
+		return -ENODEV;
+
+	if (mask & 0xFF) {
+
+		shipmode_info_reg = QPNP_PON_XVDD_RB_SPARE(pon);
+
+		rc = regmap_read(pon->regmap, shipmode_info_reg, &value);
+		if (rc) {
+			dev_err(&pon->pdev->dev,
+				"Unable to check shipmode status, rc(%d)\n",
+				rc);
+		}
+		pr_err("Current shipmode info1 is 0x%x = 0x%x\n",
+		       shipmode_info_reg, value);
+
+		rc = qpnp_pon_masked_write(pon, shipmode_info_reg,
+		    mask & 0xFF, val & 0xFF);
+		if (rc) {
+			pr_err("Failed to store shipmode info to 0x%x\n",
+			    shipmode_info_reg);
+			return rc;
+		}
+		pr_err("Write shipmode info1 to 0x%x with 0x%x\n",
+		       shipmode_info_reg, val);
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(qpnp_pon_store_shipmode_info);
+
+bool qpnp_pon_check_shipmode_info(void)
+{
+	int rc = 0;
+	u16 shipmode_info_reg;
+	unsigned int value;
+	struct qpnp_pon *pon = shipmode_dev;
+
+	if (!pon)
+		return false;
+
+	shipmode_info_reg = QPNP_PON_XVDD_RB_SPARE(pon);
+
+	rc = regmap_read(pon->regmap, shipmode_info_reg, &value);
+	if (rc) {
+		dev_err(&pon->pdev->dev,
+			"Unable to check shipmode status, rc(%d)\n",
+			rc);
+		return false;
+	}
+	pr_info("Current shipmode info is 0x%x = 0x%x\n",
+		shipmode_info_reg, value);
+
+	return ((value & RESET_SHIPMODE_INFO_SHPMOD_REASON) != 0);
+}
+EXPORT_SYMBOL(qpnp_pon_check_shipmode_info);
 
 /*
  * qpnp_pon_check_hard_reset_stored - Checks if the PMIC need to
@@ -802,6 +916,9 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 	u32 key_status;
 	uint pon_rt_sts;
 	u64 elapsed_us;
+	struct timeval timestamp;
+	struct tm tm;
+	char buff[255];
 
 	cfg = qpnp_get_cfg(pon, pon_type);
 	if (!cfg)
@@ -827,9 +944,22 @@ qpnp_pon_input_dispatch(struct qpnp_pon *pon, u32 pon_type)
 		return rc;
 	}
 
+	qpnp_pon_key_status = pon_rt_sts;
+
 	switch (cfg->pon_type) {
 	case PON_KPDPWR:
 		pon_rt_bit = QPNP_PON_KPDPWR_N_SET;
+
+	/* get the time stamp in readable format to print*/
+	do_gettimeofday(&timestamp);
+	time_to_tm((time_t)(timestamp.tv_sec), 0, &tm);
+	snprintf(buff, sizeof(buff),
+		"%u-%02d-%02d %02d:%02d:%02d UTC",
+		(int) tm.tm_year + 1900, tm.tm_mon + 1,
+		tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	pr_info("Report pwrkey %s event at: %s\n", pon_rt_bit &
+		pon_rt_sts ? "press" : "release", buff);
 		break;
 	case PON_RESIN:
 		pon_rt_bit = QPNP_PON_RESIN_N_SET;
@@ -1992,7 +2122,7 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 	unsigned int base;
 	struct device_node *node = NULL;
 	u32 delay = 0, s3_debounce = 0;
-	int rc, sys_reset, index;
+	int rc, sys_reset, index, shipmode;
 	int reason_index_offset = 0;
 	u8 buf[2];
 	uint pon_sts = 0;
@@ -2020,6 +2150,15 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 		return -EINVAL;
 	} else if (sys_reset) {
 		sys_reset_dev = pon;
+	}
+
+	shipmode = of_property_read_bool(pdev->dev.of_node,
+						"qcom,shipmode");
+	if (shipmode && shipmode_dev) {
+		dev_err(&pdev->dev, "qcom,shipmode property can only be specified for one device on the system\n");
+		return -EINVAL;
+	} else if (shipmode) {
+		shipmode_dev = pon;
 	}
 
 	pon->pdev = pdev;

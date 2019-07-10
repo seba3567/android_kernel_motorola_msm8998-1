@@ -198,16 +198,6 @@ config MSM_QMI_INTERFACE
 	  to perform QMI message marshaling and transport them over IPC
 	  Router.
 
-config MSM_L2_IA_DEBUG
-       bool "Enable MSM L2 Indirect Access Debug"
-       depends on DEBUG_FS
-       default n
-       help
-         This option enables L2 indirect access debug
-         capability. It exposes L2 indirect access
-         debugfs interface to get/set data, address,
-         and target cpus.
-
 config MSM_RPM_SMD
 	bool "RPM driver using SMD protocol"
 	help
@@ -436,6 +426,18 @@ config QCOM_WATCHDOG_V2
 	  watchdog times out. It allows for detection of cpu hangs and
 	  deadlocks. It does not run during the bootup process, so it will
 	  not catch any early lockups.
+
+config QCOM_WATCHDOG_CTX_PRINT
+	bool "Print context dump saved by secure mode watchdog handler"
+	default n
+	depends on QCOM_WATCHDOG_V2
+	depends on QCOM_MEMORY_DUMP_V2
+	depends on PSTORE_RAM_ANNOTATION_APPEND
+	help
+	   After enabling this option, kernel will reserve bigger buffer
+	   for secure mode watchdog handler to save info. And kernel will
+	   try to print the info if it looks valid.
+	   If unsure, say N
 
 config QCOM_IRQ_HELPER
 	bool "QCOM Irq Helper"
@@ -806,6 +808,70 @@ config QCOM_FORCE_WDOG_BITE_ON_PANIC
 	  kernel panic. On certain MSM SoCs, this provides us
 	  additional debugging information.
 
+config MMI_DEVICE_DTBS
+	depends on ARCH_QCOM
+	default n
+	bool "Motorola Mobility Device DTBs"
+	help
+	  Only include Motorola device specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config PAYTON_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Payton DTBs"
+	help
+	  Only include Payton specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config HEART_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Heart DTBs"
+	help
+	  Only include Heart specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config LAKE_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Lake DTBs"
+	help
+	  Only include Lake specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config CHEF_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Chef DTBs"
+	help
+	  Only include Chef specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config FLAY_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Flay DTBs"
+	help
+	  Only include Flay specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config EVERT_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Evert DTBs"
+	help
+	  Only include Evert specific DTBs to limit the number that
+	  get built during kernel compilation.
+
+config BECKHAM_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Beckham DTBs"
+	help
+	  Only include Beckham specific DTBs to limit the number that
+	  get built during kernel compilation.
+
 config MSM_MPM_OF
        bool "Modem Power Manager"
        depends on OF
@@ -994,3 +1060,36 @@ config EXT_ANC
 	 on Sensor DSP.
 
 source "drivers/soc/qcom/memshare/Kconfig"
+
+config MMI_SOC_INFO
+	default n
+	bool "Motorola Mobility SOC Info"
+	help
+	  Provide mechanism to export MSM SOC info.
+
+config MMI_RAM_INFO
+	default n
+	bool "Motorola Mobility RAM Info"
+	help
+	Provide mechanism to access RAM size and MR registers values via sysfs.
+
+config MMI_STORAGE_INFO
+	default n
+	bool "Motorola Mobility STORAGE Info"
+	help
+	Provide mechanism to export EMMC/UFS type, size and vendor info.
+
+config MMI_UNIT_INFO
+	default n
+	bool "Motorola Mobility Unit Info"
+	help
+	Provide mechanism to expose unit information to other cpu via smem.
+
+config BOOTINFO
+	bool "Boot Information Feature"
+	default n
+	help
+	  This feature provides access to certain boot information
+	  from both kernel context (via function call) and user
+	  context (via /proc/bootinfo).
+

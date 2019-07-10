@@ -32,6 +32,7 @@
  */
 struct mdss_dba_utils_init_data {
 	struct kobject *kobj;
+	struct platform_device *pdev;
 	u32 instance_id;
 	u32 fb_node;
 	char *chip_name;
@@ -43,6 +44,7 @@ struct mdss_dba_utils_init_data {
 int mdss_dba_utils_video_on(void *data, struct mdss_panel_info *pinfo);
 int mdss_dba_utils_video_off(void *data);
 void mdss_dba_utils_hdcp_enable(void *data, bool enable);
+int mdss_dba_utils_reconfigure_dsi(void *data, struct mdss_panel_info *pinfo);
 
 void *mdss_dba_utils_init(struct mdss_dba_utils_init_data *init_data);
 void mdss_dba_utils_deinit(void *data);

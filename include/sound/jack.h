@@ -43,6 +43,8 @@ struct input_dev;
  * @SND_JACK_BTN_3: Button 3
  * @SND_JACK_BTN_4: Button 4
  * @SND_JACK_BTN_5: Button 5
+ * @SND_JACK_BTN_6: Button 6
+ * @SND_JACK_BTN_7: Button 7
  *
  * These values are used as a bitmask.
  *
@@ -66,12 +68,14 @@ enum snd_jack_types {
 				 SND_JACK_MICROPHONE2,
 
 	/* Kept separate from switches to facilitate implementation */
-	SND_JACK_BTN_0		= 0x8000,
-	SND_JACK_BTN_1		= 0x4000,
-	SND_JACK_BTN_2		= 0x2000,
-	SND_JACK_BTN_3		= 0x1000,
-	SND_JACK_BTN_4		= 0x0800,
-	SND_JACK_BTN_5		= 0x0400,
+	SND_JACK_BTN_0		= 0x8000000,
+	SND_JACK_BTN_1		= 0x4000000,
+	SND_JACK_BTN_2		= 0x2000000,
+	SND_JACK_BTN_3		= 0x1000000,
+	SND_JACK_BTN_4		= 0x0800000,
+	SND_JACK_BTN_5		= 0x0400000,
+	SND_JACK_BTN_6		= 0x0200000,
+	SND_JACK_BTN_7		= 0x0100000,
 };
 
 /* Keep in sync with definitions above */
@@ -85,7 +89,7 @@ struct snd_jack {
 	int type;
 	const char *id;
 	char name[100];
-	unsigned int key[6];   /* Keep in sync with definitions above */
+	unsigned int key[8];   /* Keep in sync with definitions above */
 	void *private_data;
 	void (*private_free)(struct snd_jack *);
 };
