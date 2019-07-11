@@ -1,3 +1,86 @@
+# Only include Motorola DTBs
+ifeq ($(CONFIG_MMI_DEVICE_DTBS),y)
+# Add 1k of padding to the DTBs to allow for environment variables
+# to be runtime added by the bootloader (i.e. /chosen properties)
+DTC_FLAGS += -p 1024
+
+# Motorola Device Trees
+dtb-$(CONFIG_ARCH_MSM8998) += msm8998-saratoga-p1.dtb \
+	msm8998-saratoga-p1a.dtb \
+	msm8998-nash-evt1-v2.dtb \
+	msm8998-nash-evt1-v1.dtb \
+	msm8998-nash-dvt1.dtb \
+	msm8998-nash-dvt1b.dtb \
+	msm8998-nash-dvt2.dtb \
+	msm8998-nash-dvt2b.dtb \
+	msm8998-loki-evt1.dtb \
+	msm8998-messi-evt1.dtb
+
+ifeq ($(CONFIG_BECKHAM_DTB),y)
+dtb-$(CONFIG_ARCH_SDM660) += sdm660-beckham-evt1.dtb \
+	sdm660-beckham-evt2.dtb \
+	sdm636-beckham-evt1.dtb \
+	sdm636-beckham-dvt1a.dtb \
+	sdm636-beckham-dvt1b.dtb \
+	sdm636-beckham-dvt2a.dtb \
+	sdm636-beckham-dvt2b.dtb \
+	sdm636-beckham-dvt3.dtb \
+	sdm636-beckham-pvt.dtb
+endif
+
+ifeq ($(CONFIG_PAYTON_DTB),y)
+dtb-$(CONFIG_ARCH_SDM630) += sdm630-payton-p0a.dtb \
+	sdm630-payton-p1a.dtb \
+	sdm630-payton-p2a.dtb \
+	sdm630-payton-p2b.dtb
+endif
+
+ifeq ($(CONFIG_EVERT_DTB),y)
+dtb-$(CONFIG_ARCH_SDM630) += sdm630-evert-evt1.dtb \
+	sdm630-evert-dvt1a.dtb \
+	sdm630-evert-dvt1b.dtb \
+	sdm630-evert-dvt2.dtb \
+	sdm630-evert-pvt1.dtb
+endif
+
+ifeq ($(CONFIG_HEART_DTB),y)
+dtb-$(CONFIG_ARCH_SDM630) += sdm630-heart-evb.dtb
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-heart-evb.dtb
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-heart-evt1.dtb
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-heart-evt2.dtb
+endif #CONFIG_HEART_DTB
+
+ifeq ($(CONFIG_LAKE_DTB),y)
+ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)
+dtbo-$(CONFIG_ARCH_SDM636) += \
+	sdm636-lake-evt1-overlay.dtbo \
+	sdm636-lake-evt2-overlay.dtbo \
+	sdm636-lake-na-evt2-overlay.dtbo
+
+sdm636-lake-evt1-overlay.dtbo-base :=  sdm636-lake-base.dtb
+sdm636-lake-evt2-overlay.dtbo-base :=  sdm636-lake-base.dtb
+sdm636-lake-na-evt2-overlay.dtbo-base :=  sdm636-lake-base.dtb
+else
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-lake-evt1.dtb
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-lake-evt2.dtb
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-lake-na-evt2.dtb
+endif
+endif #CONFIG_LAKE_DTB
+
+ifeq ($(CONFIG_CHEF_DTB),y)
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-chef-evt.dtb
+endif
+
+ifeq ($(CONFIG_FLAY_DTB),y)
+dtb-$(CONFIG_ARCH_SDM636) += sdm636-flay-evt.dtb
+endif
+
+ifeq ($(CONFIG_PAYTON_DTB),y)
+dtb-$(CONFIG_ARCH_SDM660) += sdm660-paytonpro-p0a.dtb
+endif
+
+else
+# Only include QC architecture specific DTBs
 dtb-$(CONFIG_ARCH_MSM8996) += msm8996-v2-pmi8994-cdp.dtb \
 	msm8996-v2-pmi8994-mtp.dtb \
 	msm8996-v2-pmi8994-pmk8001-cdp.dtb \
@@ -144,41 +227,6 @@ msm8998-v2.1-mtp-overlay.dtbo-base :=  msm8998-v2.1.dtb
 msm8998-qrd-overlay.dtbo-base :=  msm8998-qrd.dtb
 msm8998-qrd-vr1-overlay.dtbo-base :=  msm8998-qrd-vr1.dtb
 msm8998-qrd-skuk-overlay.dtbo-base :=  msm8998-qrd-skuk.dtb
-else
-dtb-$(CONFIG_ARCH_MSM8998) += msm8998-sim.dtb \
-	msm8998-rumi.dtb \
-	msm8998-cdp.dtb \
-	msm8998-mtp.dtb \
-	msm8998-qrd.dtb \
-	msm8998-v2-sim.dtb \
-	msm8998-v2-rumi.dtb \
-	msm8998-v2-mtp.dtb \
-	msm8998-v2-cdp.dtb \
-	msm8998-v2-qrd.dtb \
-	msm8998-qrd-skuk.dtb \
-	msm8998-v2-qrd-skuk.dtb \
-	msm8998-qrd-vr1.dtb \
-	msm8998-v2-qrd-vr1.dtb \
-	msm8998-v2-qrd-skuk-evt3.dtb \
-	msm8998-v2-qrd-skuk-hdk.dtb \
-	apq8098-mtp.dtb \
-	apq8098-cdp.dtb \
-	apq8098-v2-mtp.dtb \
-	apq8098-v2-cdp.dtb \
-	apq8098-v2-qrd.dtb \
-	apq8098-v2-qrd-skuk-hdk.dtb \
-	msm8998-v2.1-mtp.dtb \
-	msm8998-v2.1-mtp-4k-display.dtb \
-	msm8998-v2.1-cdp.dtb \
-	msm8998-v2.1-qrd.dtb \
-	apq8098-v2.1-mtp.dtb \
-	apq8098-v2.1-cdp.dtb \
-	apq8098-v2.1-qrd.dtb \
-	apq8098-v2.1-mediabox.dtb \
-	apq8098-v2.1-svr20.dtb \
-	msm8998-v2.1-interposer-sdm660-cdp.dtb \
-	msm8998-v2.1-interposer-sdm660-mtp.dtb \
-	msm8998-v2.1-interposer-sdm660-qrd.dtb
 endif
 
 dtb-$(CONFIG_ARCH_MSMHAMSTER) += msmhamster-rumi.dtb
@@ -260,7 +308,7 @@ dtb-$(CONFIG_ARCH_SDM660) += sdm660-sim.dtb \
 	sda636-pm660a-cdp.dtb \
 	sda636-pm660a-mtp.dtb \
 	sda636-pm660a-qrd-hdk.dtb \
-	sda636-pm660a-rcm.dtb
+	sda658-pm660a-rcm.dtb
 
 dtb-$(CONFIG_ARCH_SDM630) += sdm630-rumi.dtb \
 	sdm630-pm660a-rumi.dtb \
@@ -290,6 +338,7 @@ dtb-$(CONFIG_ARCH_SDM630) += sdm630-rumi.dtb \
 	sdm630-headset-jacktype-no-rcm.dtb \
 	sdm630-pm660a-headset-jacktype-no-cdp.dtb \
 	sdm630-pm660a-headset-jacktype-no-rcm.dtb
+endif # CONFIG_MMI_DEVICE_DTBS
 
 ifeq ($(CONFIG_ARM64),y)
 always          := $(dtb-y)

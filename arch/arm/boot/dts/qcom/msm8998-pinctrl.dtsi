@@ -825,62 +825,6 @@
 			};
 		};
 
-		/* USB C analog configuration */
-		wcd_usbc_analog_en1 {
-			wcd_usbc_analog_en1_idle: wcd_usbc_ana_en1_idle {
-				mux {
-					pins = "gpio59";
-					function = "gpio";
-				};
-				config {
-					pins = "gpio59";
-					drive-strength = <2>;
-					bias-pull-down;
-					output-low;
-				};
-			};
-
-			wcd_usbc_analog_en1_active: wcd_usbc_ana_en1_active {
-				mux {
-					pins = "gpio59";
-					function = "gpio";
-				};
-				config {
-					pins = "gpio59";
-					drive-strength = <2>;
-					bias-disable;
-					output-high;
-				};
-			};
-		};
-
-		wcd_usbc_analog_en2n {
-			wcd_usbc_analog_en2n_idle: wcd_usbc_ana_en2n_idle {
-				mux {
-					pins = "gpio60";
-					function = "gpio";
-				};
-				config {
-					pins = "gpio60";
-					drive-strength = <2>;
-					bias-disable;
-					output-high;
-				};
-			};
-
-			wcd_usbc_analog_en2n_active: wcd_usbc_ana_en2n_active {
-				mux {
-					pins = "gpio60";
-					function = "gpio";
-				};
-				config {
-					pins = "gpio60";
-					drive-strength = <2>;
-					bias-pull-down;
-					output-low;
-				};
-			};
-		};
 
 		cdc_reset_ctrl {
 			cdc_reset_sleep: cdc_reset_sleep {
@@ -2256,28 +2200,16 @@
 		led_enable: led_enable {
 			mux {
 				pins = "gpio21";
-				function = "gpio";
-			};
-
-			config {
-				pins = "gpio21";
-				drive_strength = <2>;
+				drive_strength = <16>;
 				output-high;
-				bias-disable;
 			};
 		};
 
 		led_disable: led_disable {
 			mux {
 				pins = "gpio21";
-				function = "gpio";
-			};
-
-			config {
-				pins = "gpio21";
 				drive_strength = <2>;
 				output-low;
-				bias-disable;
 			};
 		};
 
@@ -3392,34 +3324,6 @@
 					pins = "gpio63";
 					drive-strength = <8>;   /* 8 mA */
 					bias-disable;           /* NO PULL */
-				};
-			};
-		};
-
-		spkr_i2s_clk_pin {
-			spkr_i2s_clk_sleep: spkr_i2s_clk_sleep {
-				mux {
-					pins = "gpio69";
-					function = "spkr_i2s";
-				};
-
-				config {
-					pins = "gpio69";
-					drive-strength = <2>; /* 2 mA */
-					bias-pull-down;       /* PULL DOWN */
-				};
-			};
-
-			spkr_i2s_clk_active: spkr_i2s_clk_active {
-				mux {
-					pins = "gpio69";
-					function = "spkr_i2s";
-				};
-
-				config {
-					pins = "gpio69";
-					drive-strength = <8>; /* 8 mA */
-					bias-disable;         /* NO PULL */
 				};
 			};
 		};

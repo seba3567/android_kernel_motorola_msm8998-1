@@ -1,0 +1,276 @@
+/* Copyright (c) 2016, Motorola Mobility Inc. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ */
+
+/*
+ * Assuming there will be NO more Messi boards built with V1 MSM parts
+ * beyond the small amount of early EVT1 boards, all future Messi dts
+ * should directly include this file instead of msm8998-nash-common.dtsi,
+ * though common dt changes could go to msm8998-nash-common.dtsi
+ */
+
+#include "msm8998-v2.dtsi"
+#include "msm8998-moto-common.dtsi"
+#include "msm8998-camera-sensor-mot-messi.dtsi"
+#include "dsi-panel-mot-smd-601-1080p-messie-cmd.dtsi"
+#include "dsi-panel-mot-tianma-601-1080p-messie-cmd.dtsi"
+#include "msm8998-messi-audio.dtsi"
+
+/ {
+	model = "Messi";
+	compatible = "qcom,msm8998-messi", "qcom,msm8998-moto",
+			"qcom,msm8998";
+
+	aliases {
+		/delete-property/ spi1;
+	};
+
+	firmware: firmware {
+		android {
+			compatible = "android,firmware";
+			fstab {
+				compatible = "android,fstab";
+				vendor {
+					compatible = "android,vendor";
+					dev = "/dev/block/platform/soc/1da4000.ufshc/by-name/vendor";
+					type = "ext4";
+					mnt_flags = "ro,barrier=1,discard";
+					fsmgr_flags = "wait,slotselect,verify";
+					status = "ok";
+				};
+			};
+		};
+	};
+
+};
+
+&i2c_7 {
+	tps61280@75 {
+		compatible = "ti,tps61280";
+		reg = <0x75>;
+		ti,config = <0x0D>;
+		ti,vout-floor = <0x0D>;
+		ti,vout-roof = <0x19>;
+		ti,ilim = <0x0F>;
+	};
+
+	cypress_capsensor@1D {
+		compatible = "cypress,sf3155";
+		label = "MotorolaCapSense";
+		reg = <0x1D>;
+		vdd-supply = <&pm8998_lvs2>;
+		vddio-supply = <&pm8998_lvs2>;
+		avdd-supply = <&pm8998_lvs2>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <63 0>;
+		silicon_id = <0x0BB11477>;
+		block_size = <64>;
+		num_of_blocks = <256>;
+		secure_bytes = <32>;
+		pinctrl-names = "default";
+		gpios = <&pmi8998_gpios 14 0x1>, /* RESET */
+		      <&tlmm 90 0>, /* programming SCLK */
+		      <&tlmm 94 0>, /* programming SDAT */
+		      <&tlmm 63 0>; /* sar int irq */
+		use-raw-gpio-rw = <1>;
+		gpio_base_addr = <0x03000004>;
+		gpio_base_size = <0x00e00000>;
+		gpio_clk_group = <0x00d00000>;
+		gpio_dat_group = <0x00d00000>;
+		cyttsp,sar-status-reg = <0x50>;
+		cyttsp,standby-reg = <0x51>;
+		cyttsp,bootloader-addr = <0x02>;
+		cyttsp,key-num = <4>;
+		cyttsp,key-codes = <4>;
+	};
+
+	/delete-node/ qcom,smb138x@8;
+	/delete-node/ tmp108@48;
+	/delete-node/ tmp108@49;
+	drv2624@5a {
+		status = "ok";
+		compatible = "ti,drv2624";
+		reg = <0x5A>;
+		/* voltage = *_voltage x 22 mV */
+		/* 1.8V for now */
+		ti,rated_voltage = /bits/ 8 <0x49>;
+		ti,overdrive_voltage = /bits/ 8 <0x92>;
+		ti,rate_voltage_clamp = /bits/ 8 <0x97>;
+		ti,rtp_input = /bits/ 8 <0x7f>;
+		ti,rtp_input_reduced = /bits/ 8 <0x51>;
+		/* LRA period = lra_freq x 24.39 us */
+		/* 205 Hz for now */
+		ti,lra_freq = /bits/ 8 <0xCD>;
+		ti,lra_drive;
+		ti,auto_cal;
+		ti,auto_cal_time = /bits/ 8 <0x01>;
+		/* sample time 300us  */
+		ti,sample_time = /bits/ 8 <0x1c>;
+		ti,drive_time = /bits/ 8 <0x13>;
+	};
+};
+
+&soc {
+	qcom,tz_gpio {
+		compatible = "qcom,tz_gpio";
+		tlmm-tz = <9>,
+			<58>,
+			<59>,
+			<60>,
+			<61>,
+			<123>;
+	};
+
+	alsa_to_h2w {
+	status = "disabled";
+	};
+
+	qcom,msm-thermal {
+		qcom,config-info = "messi";
+	};
+	/delete-node/ spi@c175000;
+
+	qcom,bcl {
+		qcom,bcl-charger-mitigate-enable;
+	};
+};
+
+&tlmm {
+	/delete-node/ spi_1;  /* delete spi_1 node in tlmm */
+	/delete-node/ kungpow_default;
+
+	/* SPI_I2C_MPHY_SEL, RGB_MOD_SEL*/
+	muc_spi_i2c_switch: muc_spi_i2c_switch@0 {
+		config {
+			pins = "gpio40", "gpio100";
+			bias-disable;
+		};
+	};
+};
+
+&red_led {
+	linux,name = "charging";
+	/delete-property/ linux,default-trigger;
+	qcom,ramp-step-ms = <100>;
+	qcom,start-idx = <0>;
+	qcom,idx-len = <42>;
+	qcom,duty-pcts =
+		[00 05 0a 0f 14 19 1e 23 28 2d 32 37 3c 41 46 4b 50 55 5a 5f 64
+		64 5f 5a 55 50 4b 46 41 3c 37 32 2d 28 23 1e 19 14 0f 0a 05 00];
+	qcom,use-blink;
+};
+
+/delete-node/ &green_led;
+/delete-node/ &blue_led;
+
+&spmi_bus {
+	qcom,pm8998@0 {
+		qcom,power-on@800 {
+			qcom,pon_1 {
+				qcom,support-reset = <1>;
+				qcom,s1-timer = <6720>;
+				qcom,s2-timer = <2000>;
+				qcom,s2-type = <7>;
+			};
+/*MMI_STOPSHIP*/
+			qcom,pon_3 {
+				qcom,support-reset = <1>;
+				qcom,s1-timer = <4480>;
+				qcom,s2-timer = <2000>;
+				qcom,s2-type = <1>;
+			};
+/*MMI_STOPSHIP*/
+		};
+	};
+};
+&mot_batterydata {
+	qcom,batt-id-range-pct = <15>;
+	df-serialnum = "SB18C20118";
+	#include "batterydata-js40-scud-pmi8998.dtsi"
+	#include "batterydata-js40-swd-pmi8998.dtsi"
+};
+
+&pmi8998_fg {
+	qcom,battery-data = <&mot_batterydata>;
+	qcom,fg-cutoff-voltage = <3200>;
+	qcom,fg-empty-voltage = <3000>;
+	qcom,fg-chg-term-current = <100>;
+	qcom,fg-sys-term-current = <(-200)>;
+	qcom,battery-thermal-coefficients = [c0 50 ff];
+	qcom,battery-thermal-high-lut = <550 0>,
+					<600 30>,
+					<650 70>,
+					<700 110>;
+	qcom,battery-thermal-low-lut = <(-90) 0>,
+					<(-120) (-30)>,
+					<(-150) (-60)>,
+					<(-180) (-90)>,
+					<(-210) (-190)>;
+};
+
+&pmi8998_charger {
+	pinctrl-0 = <&eb_vbus_conf>;
+	pinctrl-1 = <&eb_vbus_active>;
+	qcom,dc-icl-ua = <1500000>;
+	qcom,enable-charging-limit;
+	qcom,upper-limit-capacity = <75>;
+	qcom,lower-limit-capacity = <60>;
+	qcom,iterm-ma = <58>;
+	qcom,mmi-temp-zones = <0 4200 582 0>,
+				<10 4200 1455 582>,
+				<15 0 1455 1455>,
+				<45 4250 3000 2000>,
+				<60 4200 1455 0>;
+};
+
+&mdss_dsi0 {
+	qcom,dsi-pref-prim-pan = <&mot_smd_601_1080p_cmd_v0>;
+};
+
+&muc {
+		gpios = <&tlmm 36 1>,            /* gpio_muc_det_n, input */
+			<&tlmm 35 0>,            /* gpio_muc_bplus_en, output-low */
+			<&tlmm 26 1>,            /* gpio_muc_int_n, input */
+			<&tlmm 28 2>,            /* gpio_muc_wake_n, output-high */
+			<&tlmm 95 1>,            /* gpio_muc_rdy_n, input */
+			<&tlmm 143 0>,           /* gpio_muc_ff, output-low */
+			<&tlmm 49 0>,            /* gpio_muc_spi_mosi, output-low */
+			<&tlmm 50 1>,            /* gpio_muc_spi_miso, input */
+			<&pmi8998_gpios 11 0>, /* gpio_muc_bplus_iset, cs */
+			<0>,                     /* gpio_muc_bplus_discharg, cs */
+			<&pmi8998_gpios 10 1>, /* gpio_muc_bplus_fault_n, input */
+			<&tlmm 52 1>,            /* gpio_muc_clk, input */
+			<&tlmm 40 0>,            /* gpio_muc_spi_i2c_sel, output-low */
+			<&tlmm 100 0>;            /* gpio_muc_rgb_mod_sel, output-low */
+
+		mmi,muc-ctrl-gpio-labels = "gpio_muc_det_n",
+				"gpio_muc_bplus_en",
+				"gpio_muc_int_n",
+				"gpio_muc_wake_n",
+				"gpio_muc_rdy_n",
+				"gpio_muc_ff",
+				"gpio_muc_spi_mosi",
+				"gpio_muc_spi_miso",
+				"gpio_muc_bplus_iset",
+				"gpio_muc_bplus_discharg",
+				"gpio_muc_bplus_fault_n",
+				"gpio_muc_clk",
+				"gpio_muc_spi_i2c_sel",
+				"gpio_muc_rgb_mod_sel";
+
+		pinctrl-0 = <&muc_attach &muc_det &spi_9_sleep &muc_spi_ctrl &muc_spi_i2c_switch>;
+		pinctrl-1 = <&muc_attach &muc_det &spi_9_active &muc_spi_ctrl &muc_spi_i2c_switch>;
+		pinctrl-3 = <&muc_attach &muc_det &i2c_9_active &muc_spi_ctrl &muc_spi_i2c_switch>;
+		mmi,muc-ctrl-en-seq = <1 1 100>, <12 0 100>, <13 0 100>;
+		mmi,muc-ctrl-dis-seq = <1 0 505>, <12 0 100>, <13 0 100>;
+		mmi,muc-ctrl-select-spi-seq = <12 0 100>, <13 0 100>;
+		mmi,muc-ctrl-select-i2c-seq = <12 1 100>, <13 1 100>;
+};
