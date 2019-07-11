@@ -420,7 +420,7 @@ int fg_write(struct fg_chip *chip, int addr, u8 *val, int len)
 		return -ENXIO;
 
 	mutex_lock(&chip->bus_lock);
-	sec_access = (addr & 0x00FF) > 0xD0;
+	sec_access = (addr & 0x00FF) > 0xBA;
 	if (sec_access) {
 		rc = regmap_write(chip->regmap, (addr & 0xFF00) | 0xD0, 0xA5);
 		if (rc < 0) {
@@ -460,7 +460,7 @@ int fg_masked_write(struct fg_chip *chip, int addr, u8 mask, u8 val)
 		return -ENXIO;
 
 	mutex_lock(&chip->bus_lock);
-	sec_access = (addr & 0x00FF) > 0xD0;
+	sec_access = (addr & 0x00FF) > 0xBA;
 	if (sec_access) {
 		rc = regmap_write(chip->regmap, (addr & 0xFF00) | 0xD0, 0xA5);
 		if (rc < 0) {
@@ -552,6 +552,13 @@ static int fg_sram_dfs_open(struct inode *inode, struct file *file)
 
 	file->private_data = trans;
 	return 0;
+}
+
+static int fg_sram_dfs_dump_open(struct inode *inode, struct file *file)
+{
+	dbgfs_data.addr = 0;
+	dbgfs_data.cnt = FG_SRAM_LEN;
+	return fg_sram_dfs_open(inode, file);
 }
 
 static int fg_sram_dfs_close(struct inode *inode, struct file *file)
@@ -830,6 +837,12 @@ static const struct file_operations fg_sram_dfs_reg_fops = {
 	.write		= fg_sram_dfs_reg_write,
 };
 
+static const struct file_operations fg_sram_dfs_dump_fops = {
+	.open		= fg_sram_dfs_dump_open,
+	.release	= fg_sram_dfs_close,
+	.read		= fg_sram_dfs_reg_read,
+};
+
 /*
  * fg_debugfs_create: adds new fg_sram debugfs entry
  * @return zero on success
@@ -876,6 +889,15 @@ static int fg_sram_debugfs_create(struct fg_chip *chip)
 					&fg_sram_dfs_reg_fops);
 	if (!file) {
 		pr_err("error creating 'data' entry\n");
+		goto err_remove_fs;
+	}
+
+	file = debugfs_create_file("sram_dump",
+				    S_IFREG | S_IWUSR | S_IRUGO,
+				    dfs_sram, chip,
+				    &fg_sram_dfs_dump_fops);
+	if (!file) {
+		pr_err("error creating 'sram_dump' entry\n");
 		goto err_remove_fs;
 	}
 
