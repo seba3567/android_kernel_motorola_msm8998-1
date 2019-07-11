@@ -441,6 +441,15 @@ config QCOM_THERMAL_LIMITS_DCVS
 	  tracking temperatures of the CPUs and taking thermal action in the
 	  hardware without s/w intervention.
 
+config MMI_SYS_TEMP
+	tristate "Motorola Surface Temperature Driver"
+	depends on THERMAL
+	default n
+	help
+	  This creates a sysfs property for front and back surface
+	  temperatures. These are meant to be populated by the a
+	  user space thermal management daemon.
+
 menu "Texas Instruments thermal drivers"
 depends on ARCH_HAS_BANDGAP || COMPILE_TEST
 source "drivers/thermal/ti-soc-thermal/Kconfig"
@@ -466,5 +475,15 @@ config QCOM_SPMI_TEMP_ALARM
 	  trip points. The temperature reported by the thermal sensor reflects the
 	  real time die temperature if an ADC is present or an estimate of the
 	  temperature based upon the over temperature stage value.
+
+config GENERIC_ADC_THERMAL
+	tristate "Generic ADC based thermal sensor"
+	depends on IIO
+	help
+	  This enabled a thermal sysfs driver for the temperature sensor
+	  which is connected to the General Purpose ADC. The ADC channel
+	  is read via IIO framework and the channel information is provided
+	  to this driver. This driver reports the temperature by reading ADC
+	  channel and converts it to temperature based on lookup table.
 
 endif
