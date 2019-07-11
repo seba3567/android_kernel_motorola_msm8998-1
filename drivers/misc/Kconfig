@@ -334,6 +334,17 @@ config ISL29020
 	  This driver can also be built as a module.  If so, the module
 	  will be called isl29020.
 
+config MOT_UTAG
+	tristate  "Motorola Configuration read/write support "
+	default n
+	help
+	  With this option you get read/write access to utag partition via procfs.
+	  Content of the entire partition can be checked, separate utags accessed
+	  and modified.
+
+	  This driver should be built as a module. The module will be called
+	  utags.ko.
+
 config SENSORS_TSL2550
 	tristate "Taos TSL2550 ambient light sensor"
 	depends on I2C && SYSFS
@@ -579,6 +590,102 @@ config MEMORY_STATE_TIME
 	help
 	  Memory time statistics exported to /sys/kernel/memory_state_time
 
+config HAPTIC_DRV2624
+	tristate "TI DRV2624 haptic driver"
+	depends on I2C && SYSFS
+	help
+	  Ultra Low Power Closed-Loop LRA/ERM Haptic Driver with Internal Memory
+	  If you say yes here you get support for the TI DRV2624
+	  haptic driver.
+
+config HAPTIC_DRV2625
+	tristate "TI DRV2625 haptic driver"
+	depends on I2C && SYSFS
+	help
+	  Ultra Low Power Closed-Loop LRA/ERM Haptic Driver with Internal Memory
+	  If you say yes here you get support for the TI DRV2625
+	  haptic driver.
+
+config ALSA_TO_H2W
+	tristate "ALSA to H2W wired headset detection converter"
+	help
+	  This option enables a device driver that attach to the input queue and
+	  and exposes EV_SW events SW_HEADPHONE_INSERT & SW_MICROPHONE_INSERT in
+	  /sys/class/switch/h2w/state used by Android headset observer.
+	default n
+
+config USB3813
+	tristate "Microchip USB3813 Hub Controller"
+	default n
+	help
+	  This option enables a device driver for the USB3813 which is a
+	  3-Port Hub Controller.
+
+config DROPBOX
+	tristate "Dropbox sysfs support"
+	default y
+	help
+	  This option enables a sysfs interface for drivers to send text or
+	  binary events to the Android dropbox. A lightweight userspace daemon
+	  polls the sysfs files and copies the data into dropbox using the built
+	  in dropbox manager service.  This enables fast and simple logging of
+	  various critical events from kernel drivers.
+
+config MODS_USB_EXT_BRIDGE
+	bool "Enable interface to support MODS USB"
+	default n
+	help
+	  This enables an interface that integrates the MODS usb greybus
+	  module with the kernel USB drivers. If you are using the MODS
+	  kernel modules, you should select yes, if not no.
+
+config MODS_MODBUS_EXT
+	bool "Enable control of the mods bus muxing circuit"
+	default n
+	help
+	  This enables ability to mux the i2s, mphy, and usb paths through the
+	  set of ts3usb3031 switches depending on the requested configuration.
+	  If you are using the MODS kernel modules, you should select yes, if
+	  not no.
+
+config MODS_MODBUS_SWITCH
+	bool "Enable control of the mods muxing swtich(different with mods_modbus_ext)"
+	default n
+	help
+	  This enables ability to mux the i2s, mphy, and usb paths through the
+	  set of ts3usb3031 switches depending on the requested configuration.
+	  If you are using the MODS kernel modules, you should select yes, if
+	  not no. This file is defferent with the file of mods_modbus_ext. This
+	  is a common file which could be applied in lots of defferent hw design.
+config TPS61280
+        tristate "TI TPS61280 configuration"
+        depends on I2C
+        select REGMAP_I2C
+        help
+          This driver supports TPS61280 voltage regulator chip. This
+	  driver is meant for basic configuration only and does not provide
+	  any pm/regulator/thermal framework registration.
+
+config MODS_CODEC_BUS
+	tristate "mods codec bus interface support"
+	default n
+	help
+	  This enables bus interface for mods shim sound codec to talk to
+	  greybus sound codec module.
+
+config FSUSB42_MUX
+	tristate "Fairchild Two-Port USB/UART Switch"
+	default n
+	help
+	  This option enables a device driver for the FSUSB42 which is a
+	  2 port High Speed USB/UART Switch.
+
+config MODS_2ND_GEN
+	bool "MODS_2ND_GEN Support"
+	default n
+	help
+	  This option enables the mods 2nd generation hw designation.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -592,4 +699,5 @@ source "drivers/misc/mic/Kconfig"
 source "drivers/misc/genwqe/Kconfig"
 source "drivers/misc/echo/Kconfig"
 source "drivers/misc/cxl/Kconfig"
+source "drivers/misc/cypress/Kconfig"
 endmenu
