@@ -209,12 +209,14 @@ static void *usbpd_ipc_log;
 #define SRC_CAP_TIME		120
 #define SRC_TRANSITION_TIME	25
 #define SRC_RECOVER_TIME	750
+#define FAULT_RECOVER_TIME      10
 #define PS_HARD_RESET_TIME	25
 #define PS_SOURCE_ON		400
 #define PS_SOURCE_OFF		750
 #define FIRST_SOURCE_CAP_TIME	200
 #define VDM_BUSY_TIME		50
 #define VCONN_ON_TIME		100
+#define APSD_RECHECK_TIME	5000
 
 /* tPSHardReset + tSafe0V */
 #define SNK_HARD_RESET_VBUS_OFF_TIME	(35 + 650)
@@ -286,6 +288,7 @@ static void *usbpd_ipc_log;
 #define PD_SRC_PDO_FIXED_PEAK_CURR(pdo)		(((pdo) >> 20) & 3)
 #define PD_SRC_PDO_FIXED_VOLTAGE(pdo)		(((pdo) >> 10) & 0x3FF)
 #define PD_SRC_PDO_FIXED_MAX_CURR(pdo)		((pdo) & 0x3FF)
+#define PD_SRC_PDO_FIXED_CURRENT_MASK		0x3FF
 
 #define PD_SRC_PDO_VAR_BATT_MAX_VOLT(pdo)	(((pdo) >> 20) & 0x3FF)
 #define PD_SRC_PDO_VAR_BATT_MIN_VOLT(pdo)	(((pdo) >> 10) & 0x3FF)
@@ -334,7 +337,10 @@ module_param(check_vsafe0v, bool, S_IRUSR | S_IWUSR);
 static int min_sink_current = 900;
 module_param(min_sink_current, int, S_IRUSR | S_IWUSR);
 
-static const u32 default_src_caps[] = { 0x36019096 };	/* VSafe5V @ 1.5A */
+static int start_usb_for_dcp;
+module_param(start_usb_for_dcp, int, 0600);
+
+static u32 default_src_caps[] = { 0x36019096 };	/* VSafe5V @ 1.5A */
 static const u32 default_snk_caps[] = { 0x2601912C };	/* VSafe5V @ 3A */
 
 struct vdm_tx {
@@ -675,6 +681,31 @@ static int pd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
 
 	pd->requested_current = curr;
 	pd->requested_pdo = pdo_pos;
+	usbpd_warn(&pd->dev, "select_pdo: PDO:%d, %d uV, %d uA\n",
+		   pdo_pos, uv, ua);
+	return 0;
+}
+
+static int pd_get_pdo(struct usbpd *pd, int pdo_pos, int *uv_max, int *uv_min, int *ua)
+{
+	u8 type;
+	u32 pdo = pd->received_pdos[pdo_pos - 1];
+
+	if (0 == pdo)
+		return -ENOTSUPP;
+
+	type = PD_SRC_PDO_TYPE(pdo);
+	if (type == PD_SRC_PDO_TYPE_FIXED) {
+		*ua = PD_SRC_PDO_FIXED_MAX_CURR(pdo) * 10;
+		*uv_max = *uv_min = PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50 * 1000;
+	} else if (type == PD_SRC_PDO_TYPE_AUGMENTED) {
+		*uv_max = PD_APDO_MAX_VOLT(pdo) * 100000;
+		*uv_min = PD_APDO_MIN_VOLT(pdo) *  100000;
+		*ua = PD_APDO_MAX_CURR(pdo) * 50000;
+	} else {
+		usbpd_err(&pd->dev, "Only Fixed or Programmable PDOs supported\n");
+		return -ENOTSUPP;
+	}
 
 	return 0;
 }
@@ -1214,7 +1245,7 @@ static void usbpd_set_state(struct usbpd *pd, enum usbpd_state next_state)
 			if (pd->psy_type == POWER_SUPPLY_TYPE_USB ||
 				pd->psy_type == POWER_SUPPLY_TYPE_USB_CDP ||
 				pd->psy_type == POWER_SUPPLY_TYPE_USB_FLOAT ||
-				usb_compliance_mode)
+				usb_compliance_mode || start_usb_for_dcp)
 				start_usb_peripheral(pd);
 		}
 
@@ -1931,10 +1962,9 @@ static void usbpd_sm(struct work_struct *w)
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_ACTIVE, &val);
 
-		if (pd->vbus_enabled) {
+		pd->vbus_enabled = false;
+		if (regulator_is_enabled(pd->vbus))
 			regulator_disable(pd->vbus);
-			pd->vbus_enabled = false;
-		}
 
 		if (pd->current_dr == DR_UFP)
 			stop_usb_peripheral(pd);
@@ -1990,6 +2020,17 @@ static void usbpd_sm(struct work_struct *w)
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_VOLTAGE_MIN, &val);
 
+		if (pd->requested_current) {
+			val.intval = pd->requested_current = 0;
+			power_supply_set_property(pd->usb_psy,
+					POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
+		}
+
+		pd->requested_voltage = 5000000;
+		val.intval = pd->requested_voltage;
+		power_supply_set_property(pd->usb_psy,
+				POWER_SUPPLY_PROP_VOLTAGE_MIN, &val);
+
 		pd->in_pr_swap = false;
 		val.intval = 0;
 		power_supply_set_property(pd->usb_psy,
@@ -2035,6 +2076,7 @@ static void usbpd_sm(struct work_struct *w)
 
 		if (pd->current_pr == PR_SINK) {
 			usbpd_set_state(pd, PE_SNK_STARTUP);
+			kick_sm(pd, APSD_RECHECK_TIME);
 		} else if (pd->current_pr == PR_SRC) {
 			if (!pd->vconn_enabled &&
 					pd->typec_mode ==
@@ -2900,6 +2942,12 @@ static int psy_changed(struct notifier_block *nb, unsigned long evt, void *ptr)
 	if (pd->typec_mode == typec_mode)
 		return 0;
 
+	if (pd->typec_mode == POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER &&
+		typec_mode != POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER) {
+		usbpd_dbg(&pd->dev, "Type-C Audio Disable\n");
+		pd_phy_audio_detect(false);
+	}
+
 	pd->typec_mode = typec_mode;
 
 	usbpd_dbg(&pd->dev, "typec mode:%d present:%d type:%d orientation:%d\n",
@@ -2964,6 +3012,7 @@ static int psy_changed(struct notifier_block *nb, unsigned long evt, void *ptr)
 		break;
 	case POWER_SUPPLY_TYPEC_SINK_AUDIO_ADAPTER:
 		usbpd_info(&pd->dev, "Type-C Analog Audio Adapter connected\n");
+		pd_phy_audio_detect(true);
 		break;
 	default:
 		usbpd_warn(&pd->dev, "Unsupported typec mode:%d\n",
@@ -3192,7 +3241,6 @@ static int usbpd_dr_prop_writeable(struct dual_role_phy_instance *dual_role,
 
 	switch (prop) {
 	case DUAL_ROLE_PROP_MODE:
-		return 1;
 	case DUAL_ROLE_PROP_DR:
 	case DUAL_ROLE_PROP_PR:
 		if (pd)
@@ -3428,6 +3476,224 @@ static ssize_t pdo_n_show(struct device *dev, struct device_attribute *attr,
 	usbpd_err(&pd->dev, "Invalid PDO index\n");
 	return -EINVAL;
 }
+
+int usbpd_get_current_dr(struct usbpd *pd)
+{
+	if (!pd)
+		return -EINVAL;
+
+	return (int)pd->current_dr;
+}
+EXPORT_SYMBOL(usbpd_get_current_dr);
+
+int usbpd_select_pdo_match(struct usbpd *pd)
+{
+	int uv_diff = 0, max_uv_diff = 0, pdo = 0;
+	int pdo_max_uv = 0, pdo_min_uv = 0, pdo_ua = 0;
+	int uv_in, i;
+	int ret;
+	union power_supply_propval val;
+
+	if (!pd)
+		return -EINVAL;
+
+	mutex_lock(&pd->swap_lock);
+
+	if (pd->current_pr == PR_SRC) {
+		usbpd_err(&pd->dev, "select_pdo:not support in source mode\n");
+		ret = -ENOTSUPP;
+		goto out;
+	}
+
+	/* Only allowed if we are already in explicit sink contract */
+	if (pd->current_state != PE_SNK_READY || !is_sink_tx_ok(pd)) {
+		usbpd_err(&pd->dev, "select_pdo: Cannot select new PDO yet\n");
+		ret = -EBUSY;
+		goto out;
+	}
+
+	/* Check the Max Input Voltage from USBPSY */
+	power_supply_get_property(pd->usb_psy,
+				  POWER_SUPPLY_PROP_PD_VOLTAGE_MAX, &val);
+	uv_in = val.intval;
+	/* start with 5 V */
+	max_uv_diff = 5000000;
+	for (i = 1; i < 8; i++) {
+		if (!pd_get_pdo(pd, i, &pdo_max_uv, &pdo_min_uv, &pdo_ua)) {
+			if (pdo_max_uv <= uv_in) {
+				uv_diff = uv_in - pdo_max_uv;
+				if (uv_diff < max_uv_diff) {
+					max_uv_diff = uv_diff;
+					pdo = i;
+				}
+			}
+		}
+	}
+
+	if (pdo < 1 || pdo > 7) {
+		usbpd_err(&pd->dev, "select_pdo: invalid PDO:%d\n", pdo);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	pd_get_pdo(pd, pdo, &pdo_max_uv, &pdo_min_uv, &pdo_ua);
+	ret = pd_select_pdo(pd, pdo, pdo_max_uv, pdo_ua);
+	if (ret)
+		goto out;
+	else
+		ret = pdo_max_uv;
+
+	reinit_completion(&pd->is_ready);
+	pd->send_request = true;
+	kick_sm(pd, usb_compliance_mode ? SENDER_RESPONSE_TIME : 0);
+
+	/* wait for operation to complete */
+	if (!wait_for_completion_timeout(&pd->is_ready,
+			msecs_to_jiffies(1000))) {
+		usbpd_err(&pd->dev, "select_pdo: request timed out\n");
+		ret = -ETIMEDOUT;
+		goto out;
+	}
+
+	/* determine if request was accepted/rejected */
+	if (pd->selected_pdo != pd->requested_pdo ||
+			pd->current_voltage != pd->requested_voltage) {
+		usbpd_err(&pd->dev, "select_pdo: request rejected\n");
+		ret = -EINVAL;
+	}
+
+out:
+	pd->send_request = false;
+	mutex_unlock(&pd->swap_lock);
+	return ret;
+}
+EXPORT_SYMBOL(usbpd_select_pdo_match);
+
+int usbpd_get_pdo_info(struct usbpd *pd, struct usbpd_pdo_info *pdo_info)
+{
+	int pdo = 0;
+	int i;
+	int ret = 0;
+
+	if (!pd || !pdo_info)
+		return -EINVAL;
+
+	mutex_lock(&pd->swap_lock);
+
+	if (pd->current_pr == PR_SRC) {
+		usbpd_err(&pd->dev, "select_pdo:not support in source mode\n");
+		ret = -ENOTSUPP;
+		goto out;
+	}
+	usbpd_err(&pd->dev, "select pdo info ,pd->current_state %d\n", pd->current_state);
+
+	if (!is_sink_tx_ok(pd))
+		usbpd_err(&pd->dev, "select pdo info , !is_sink_tx_ok\n");
+
+	/* Only allowed if we are already in explicit sink contract */
+	if (pd->current_state != PE_SNK_READY || !is_sink_tx_ok(pd)) {
+		usbpd_err(&pd->dev, "select_pdo_info: Cannot select new PDO yet\n");
+		ret = -EBUSY;
+		goto out;
+	}
+
+	for (i = 0; i < 7; i++) {
+		pdo = pd->received_pdos[i];
+		if (pdo == 0)
+			break;
+
+		pdo_info[i].pdo_pos = i + 1;
+		pdo_info[i].type = PD_SRC_PDO_TYPE(pdo);
+		if (pdo_info[i].type == PD_SRC_PDO_TYPE_FIXED) {
+			pdo_info[i].ua = PD_SRC_PDO_FIXED_MAX_CURR(pdo) * 10;
+			pdo_info[i].uv_max = PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50 * 1000;
+			pdo_info[i].uv_min = PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50 * 1000;
+
+			printk(KERN_INFO  "pdo %d, Fixed supply\n"
+					"Voltage:%d (uV)\n"
+					"Max Current:%d (uA)\n",
+					pdo_info[i].pdo_pos,
+					pdo_info[i].uv_max,
+					pdo_info[i].ua);
+
+		} else if (pdo_info[i].type == PD_SRC_PDO_TYPE_AUGMENTED) {
+			pdo_info[i].uv_max = PD_APDO_MAX_VOLT(pdo) * 100000;
+			pdo_info[i].uv_min = PD_APDO_MIN_VOLT(pdo) *  100000;
+			pdo_info[i].ua = PD_APDO_MAX_CURR(pdo) * 50000;
+
+			printk(KERN_INFO  "pdo %d, Programmable Power supply\n"
+					"Voltage:%d (uV)\n"
+					"Max Current:%d (uA)\n",
+					pdo_info[i].pdo_pos,
+					pdo_info[i].uv_max,
+					pdo_info[i].ua);
+
+		} else
+			usbpd_err(&pd->dev, "Only get Fixed or Programmable PDOs supported\n");
+	}
+out:
+	mutex_unlock(&pd->swap_lock);
+	return ret;
+}
+EXPORT_SYMBOL(usbpd_get_pdo_info);
+
+int usbpd_select_pdo(struct usbpd *pd, int pdo_pos, int uv, int ua)
+{
+	int ret;
+
+	if (!pd)
+		return -EINVAL;
+
+	mutex_lock(&pd->swap_lock);
+
+	if (pd->current_pr == PR_SRC) {
+		usbpd_err(&pd->dev, "select_pdo:not support in source mode\n");
+		ret = -ENOTSUPP;
+		goto out;
+	}
+
+	/* Only allowed if we are already in explicit sink contract */
+	if (pd->current_state != PE_SNK_READY || !is_sink_tx_ok(pd)) {
+		usbpd_err(&pd->dev, "select_pdo: Cannot select new PDO yet\n");
+		ret = -EBUSY;
+		goto out;
+	}
+
+	if (pdo_pos < 1 || pdo_pos > 7) {
+		usbpd_err(&pd->dev, "select_pdo: invalid PDO:%d\n", pdo_pos);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = pd_select_pdo(pd, pdo_pos, uv, ua);
+	if (ret)
+		goto out;
+
+	reinit_completion(&pd->is_ready);
+	pd->send_request = true;
+	kick_sm(pd, usb_compliance_mode ? SENDER_RESPONSE_TIME : 0);
+
+	/* wait for operation to complete */
+	if (!wait_for_completion_timeout(&pd->is_ready,
+			msecs_to_jiffies(1000))) {
+		usbpd_err(&pd->dev, "select_pdo: request timed out\n");
+		ret = -ETIMEDOUT;
+		goto out;
+	}
+
+	/* determine if request was accepted/rejected */
+	if (pd->selected_pdo != pd->requested_pdo ||
+			pd->current_voltage != pd->requested_voltage) {
+		usbpd_err(&pd->dev, "select_pdo: request rejected\n");
+		ret = -EINVAL;
+	}
+
+out:
+	pd->send_request = false;
+	mutex_unlock(&pd->swap_lock);
+	return ret;
+}
+EXPORT_SYMBOL(usbpd_select_pdo);
 
 static ssize_t select_pdo_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t size)
@@ -3836,6 +4102,7 @@ struct usbpd *usbpd_create(struct device *parent)
 {
 	int ret;
 	struct usbpd *pd;
+	u32 source_current = 0;
 
 	pd = kzalloc(sizeof(*pd), GFP_KERNEL);
 	if (!pd)
@@ -3946,6 +4213,20 @@ struct usbpd *usbpd_create(struct device *parent)
 		pd->num_sink_caps = ARRAY_SIZE(default_snk_caps);
 	}
 
+	device_property_read_u32(parent,
+					"qcom,source-current",
+					&source_current);
+
+	if (source_current) {
+		usbpd_dbg(&pd->dev, "Override default src current with %d\n",
+					source_current);
+		source_current = (source_current / 10) &
+					PD_SRC_PDO_FIXED_CURRENT_MASK;
+		default_src_caps[0] = (*default_src_caps &
+					(~PD_SRC_PDO_FIXED_CURRENT_MASK)) |
+					source_current;
+	}
+
 	/*
 	 * Register the Android dual-role class (/sys/class/dual_role_usb/).
 	 * The first instance should be named "otg_default" as that's what
@@ -4022,6 +4303,32 @@ void usbpd_destroy(struct usbpd *pd)
 	kfree(pd);
 }
 EXPORT_SYMBOL(usbpd_destroy);
+
+/**
+ * usbpd_handle_vbus_fault - Toggles the vbus if enabled
+ * to recover from a fault condition.
+ * @pd: the pd instance.
+ */
+void usbpd_handle_vbus_fault(struct usbpd *pd)
+{
+	int ret;
+
+	if (!pd || !regulator_is_enabled(pd->vbus))
+		return;
+
+	usbpd_dbg(&pd->dev, "handle vbus fault");
+	regulator_disable(pd->vbus);
+	mdelay(FAULT_RECOVER_TIME);
+
+	/* Ensure that the State Machine did not disable */
+	if (!pd->vbus_enabled)
+		return;
+
+	ret = regulator_enable(pd->vbus);
+	if (ret)
+		usbpd_err(&pd->dev, "Unable to enable vbus\n");
+}
+EXPORT_SYMBOL(usbpd_handle_vbus_fault);
 
 static int __init usbpd_init(void)
 {
