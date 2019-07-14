@@ -61,6 +61,7 @@ static struct rtc_device	*rtcdev;
 static DEFINE_SPINLOCK(rtcdev_lock);
 static struct mutex power_on_alarm_lock;
 static struct alarm init_alarm;
+static bool alarmtimer_in_suspend;
 
 /**
  * power_on_alarm_init - Init power on alarm value
@@ -91,6 +92,30 @@ void power_on_alarm_init(void)
 		alarm_init(&init_alarm, ALARM_POWEROFF_REALTIME, NULL);
 		alarm_start(&init_alarm, alarm_ktime);
 	}
+}
+
+/**
+ * power_on_alarm_empty - return if the Power ON Alarm queue has a node
+ *
+ */
+int power_on_alarm_empty(void)
+{
+	unsigned long flags;
+	struct timerqueue_node *next;
+	struct alarm_base *base = &alarm_bases[ALARM_POWEROFF_REALTIME];
+
+	if (!base)
+		return -EINVAL;
+
+	spin_lock_irqsave(&base->lock, flags);
+	next = timerqueue_getnext(&base->timerqueue);
+	spin_unlock_irqrestore(&base->lock, flags);
+
+	if (next)
+		return 0;
+
+	/* Power ON Alarm Queue Empty */
+	return 1;
 }
 
 /**
@@ -326,6 +351,11 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 	alarmtimer_dequeue(base, alarm);
 	spin_unlock_irqrestore(&base->lock, flags);
 
+	if (alarmtimer_in_suspend) {
+		pr_warn("alarm_show_resume_irq: %d triggered [%d] %pS\n",
+			alarm->type, (int)base->base_clockid, alarm->function);
+	}
+
 	if (alarm->function)
 		restart = alarm->function(alarm, base->gettime());
 
@@ -373,6 +403,7 @@ static int alarmtimer_suspend(struct device *dev)
 	int i;
 	int ret = 0;
 
+	alarmtimer_in_suspend = true;
 	spin_lock_irqsave(&freezer_delta_lock, flags);
 	min = freezer_delta;
 	freezer_delta = ktime_set(0, 0);
@@ -486,6 +517,7 @@ static int alarmtimer_resume(struct device *dev)
 {
 	struct rtc_device *rtc;
 
+	alarmtimer_in_suspend = false;
 	rtc = alarmtimer_get_rtcdev();
 	/* If we have no rtcdev, just return */
 	if (!rtc)
