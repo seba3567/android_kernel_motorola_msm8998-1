@@ -109,6 +109,20 @@ struct msm_eeprom_info_t32 {
 	compat_uptr_t mem_map_array;
 };
 
+#ifdef CONFIG_MSM_CAMERA_VENDOR_BST_FACTORY
+struct bst_eeprom_read_t32 {
+	uint32_t offset_addr;
+	compat_uptr_t  dbuffer;
+	uint32_t num_bytes;
+};
+
+struct bst_eeprom_write_t32 {
+	uint32_t offset_addr;
+	compat_uptr_t  dbuffer;
+	uint32_t num_bytes;
+};
+#endif
+
 struct msm_eeprom_cfg_data32 {
 	enum eeprom_cfg_type_t cfgtype;
 	uint8_t is_supported;
@@ -118,6 +132,10 @@ struct msm_eeprom_cfg_data32 {
 		struct eeprom_read_t32 read_data;
 		struct eeprom_write_t32 write_data;
 		struct msm_eeprom_info_t32 eeprom_info;
+#ifdef CONFIG_MSM_CAMERA_VENDOR_BST_FACTORY
+		struct bst_eeprom_read_t32	bst_read_data;
+		struct bst_eeprom_write_t32	bst_write_data;
+#endif
 	} cfg;
 };
 
@@ -161,6 +179,7 @@ struct msm_actuator_params_t32 {
 	compat_uptr_t reg_tbl_params;
 	compat_uptr_t init_settings;
 	struct park_lens_data_t park_lens;
+	struct msm_actuator_get_pos_cfg_t get_pos_cfg;
 };
 
 struct msm_actuator_set_info_t32 {
@@ -194,6 +213,7 @@ struct msm_actuator_cfg_data32 {
 		struct msm_actuator_set_info_t32 set_info;
 		struct msm_actuator_get_info_t get_info;
 		struct msm_actuator_set_position_t setpos;
+		struct msm_actuator_get_position_t getpos;
 		enum af_camera_name cam_name;
 	} cfg;
 };

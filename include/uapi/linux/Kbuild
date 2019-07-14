@@ -23,7 +23,6 @@ header-y += netfilter_ipv6/
 header-y += usb/
 header-y += wimax/
 header-y += mfd/
-header-y += nfc/
 
 genhdr-y += version.h
 
@@ -280,6 +279,7 @@ header-y += mic_ioctl.h
 header-y += mii.h
 header-y += minix_fs.h
 header-y += mman.h
+header-y += mmi_sys_temp.h
 header-y += mmtimer.h
 header-y += mpls.h
 header-y += mpls_iptunnel.h

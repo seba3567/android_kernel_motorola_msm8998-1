@@ -70,6 +70,7 @@ struct regulator_state {
  *
  * @min_uV: Smallest voltage consumers may set.
  * @max_uV: Largest voltage consumers may set.
+ * @init_uV: Initial voltage consumers may set.
  * @uV_offset: Offset applied to voltages from consumer to compensate for
  *             voltage drops.
  *
@@ -109,6 +110,7 @@ struct regulation_constraints {
 	/* voltage output range (inclusive) - for voltage control */
 	int min_uV;
 	int max_uV;
+	int init_uV;
 
 	int uV_offset;
 
@@ -148,6 +150,7 @@ struct regulation_constraints {
 	unsigned soft_start:1;	/* ramp voltage slowly */
 	unsigned pull_down:1;	/* pull down resistor when regulator off */
 	unsigned over_current_protection:1; /* auto disable on over current */
+	unsigned bypass_on:1;	/* Bypass ON */
 };
 
 /**
