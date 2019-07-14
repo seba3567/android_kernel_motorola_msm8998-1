@@ -154,6 +154,24 @@ config REGULATOR_BCM590XX
 	  BCM590xx PMUs. This will enable support for the software
 	  controllable LDO/Switching regulators.
 
+config REGULATOR_MADERA_LDO1
+	tristate "Cirrus Logic Madera codecs LDO1 regulator"
+	depends on MFD_MADERA
+	depends on SND_SOC
+	help
+	  For Cirrus Logic Madera class codecs, if you want to use the
+	  internal LDO1 regulator to supply DCVDD you need to include this
+	  driver. If you are using an external DCVDD regulator or the codec
+	  does not have an LDO1 regulator you do not need this driver.
+
+config REGULATOR_MADERA_MICSUPP
+	tristate "Cirrus Logic Madera codecs mic supply regulator"
+	depends on MFD_MADERA
+	depends on SND_SOC
+	help
+	  Support for the microphone supply regulator on Cirrus Logic
+	  Madera class codecs
+
 config REGULATOR_DA903X
 	tristate "Dialog Semiconductor DA9030/DA9034 regulators"
 	depends on PMIC_DA903X
@@ -770,6 +788,16 @@ config REGULATOR_TPS80031
 	  Path and Battery Charger. It has 5 configurable step-down
 	  converters, 11 general purpose LDOs, VBUS generator and digital
 	  output to control regulators.
+
+config REGULATOR_TPS61280
+        tristate "TI TPS61280 Power Regulator"
+        depends on I2C
+        select REGMAP_I2C
+        help
+          This driver supports TPS61280 voltage regulator chip. This
+          regulator is meant for modem power supply. This chip is
+          high-frequency synchronous step-up dc-dc converter optimized
+          for battery-powered portable applications.
 
 config REGULATOR_TWL4030
 	tristate "TI TWL4030/TWL5030/TWL6030/TPS659x0 PMIC"
