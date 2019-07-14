@@ -614,6 +614,12 @@ config GPIO_ADNP
 	  enough to represent all pins, but the driver will assume a
 	  register layout for 64 pins (8 registers).
 
+config GPIO_MADERA
+	tristate "Cirrus Logic Madera class codecs"
+	depends on MFD_MADERA
+	help
+	  Support for GPIOs on Cirrus Logic Madera class codecs.
+
 config GPIO_MAX7300
 	tristate "Maxim MAX7300 GPIO expander"
 	select GPIO_MAX730X
@@ -745,6 +751,12 @@ config GPIO_CRYSTAL_COVE
 
 	  This driver can also be built as a module. If so, the module will be
 	  called gpio-crystalcove.
+
+config GPIO_PCAL6416
+	depends on I2C
+	tristate "pcal1646 gpio support"
+	help
+	say 'y' here to include support for the PCAL6416 gpio driver.
 
 config GPIO_CS5535
 	tristate "AMD CS5535/CS5536 GPIO support"

@@ -19,6 +19,7 @@
 #include <linux/idr.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
+#include <linux/input/qpnp-power-on.h>
 #include <linux/spmi.h>
 #include <linux/platform_device.h>
 #include <linux/spinlock.h>
@@ -335,8 +336,8 @@ qpnp_rtc_set_alarm(struct device *dev, struct rtc_wkalrm *alarm)
 
 	rtc_dd->alarm_ctrl_reg1 = ctrl_reg;
 
-	dev_dbg(dev, "Alarm Set for h:r:s=%d:%d:%d, d/m/y=%d/%d/%d\n",
-			alarm->time.tm_hour, alarm->time.tm_min,
+	dev_dbg(dev, "Alarm Set Enabled: %d for h:r:s=%d:%d:%d, d/m/y=%d/%d/%d\n",
+			alarm->enabled, alarm->time.tm_hour, alarm->time.tm_min,
 			alarm->time.tm_sec, alarm->time.tm_mday,
 			alarm->time.tm_mon, alarm->time.tm_year);
 rtc_rw_fail:
@@ -486,6 +487,8 @@ static int qpnp_rtc_probe(struct platform_device *pdev)
 	struct qpnp_rtc *rtc_dd;
 	unsigned int base;
 	struct device_node *child;
+	u8 value[4] = {0};
+	u8 reg;
 
 	rtc_dd = devm_kzalloc(&pdev->dev, sizeof(*rtc_dd), GFP_KERNEL);
 	if (rtc_dd == NULL)
@@ -611,6 +614,29 @@ static int qpnp_rtc_probe(struct platform_device *pdev)
 	/* Init power_on_alarm after adding rtc device */
 	power_on_alarm_init();
 
+	/* disable rtc alarm set by shipmode if exists */
+	if (qpnp_pon_check_shipmode_info()) {
+		dev_warn(&pdev->dev, "Disable Shipmode alarm\n");
+		/* Disable RTC alarms */
+		reg = rtc_dd->alarm_ctrl_reg1;
+		reg &= ~BIT_RTC_ALARM_ENABLE;
+		rc = qpnp_write_wrapper(rtc_dd, &reg,
+			rtc_dd->alarm_base + REG_OFFSET_ALARM_CTRL1, 1);
+		if (rc)
+			dev_err(rtc_dd->rtc_dev, "SPMI write ctrl failed\n");
+		else
+			rtc_dd->alarm_ctrl_reg1 = reg;
+		/* Clear Alarm register */
+		rc = qpnp_write_wrapper(rtc_dd, value,
+			rtc_dd->alarm_base + REG_OFFSET_ALARM_RW,
+			NUM_8_BIT_RTC_REGS);
+		if (rc)
+			dev_err(rtc_dd->rtc_dev, "SPMI write alarm_rw failed\n");
+	}
+
+	qpnp_pon_store_shipmode_info(RESET_SHIPMODE_INFO_SHPMOD_REASON |
+				     RESET_SHIPMODE_INFO_ARMED_REASON, 0);
+
 	/* Request the alarm IRQ */
 	rc = request_any_context_irq(rtc_dd->rtc_alarm_irq,
 				 qpnp_alarm_trigger, IRQF_TRIGGER_RISING,
@@ -647,6 +673,16 @@ static int qpnp_rtc_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static inline int qpnp_rtc_is_rtc_alarm_enabled(struct qpnp_rtc *rtc_dd)
+{
+	return (rtc_dd->alarm_ctrl_reg1 & BIT_RTC_ALARM_ENABLE) ? 1 : 0;
+}
+
+/* Module parameter to control shipmode delay in sec */
+static unsigned int shipmode_delay = 2592000;
+module_param(shipmode_delay, uint, 0644);
+MODULE_PARM_DESC(shipmode_delay, "shipmode delay time in second");
+EXPORT_SYMBOL(shipmode_delay);
 static void qpnp_rtc_shutdown(struct platform_device *pdev)
 {
 	u8 value[4] = {0};
@@ -655,6 +691,10 @@ static void qpnp_rtc_shutdown(struct platform_device *pdev)
 	unsigned long irq_flags;
 	struct qpnp_rtc *rtc_dd;
 	bool rtc_alarm_powerup;
+
+	unsigned long secs_rtc;
+	struct rtc_time rtc_tm;
+	struct rtc_wkalrm shipmode_alarm;
 
 	if (!pdev) {
 		pr_err("qpnp-rtc: spmi device not found\n");
@@ -690,6 +730,32 @@ static void qpnp_rtc_shutdown(struct platform_device *pdev)
 fail_alarm_disable:
 		spin_unlock_irqrestore(&rtc_dd->alarm_ctrl_lock, irq_flags);
 	}
+
+	if ((power_on_alarm_empty() != 1) ||
+		qpnp_rtc_is_rtc_alarm_enabled(rtc_dd)) {
+		dev_warn(&pdev->dev, "Queue not empty unable to setup Shipmode\n");
+		return;
+	}
+
+	if (qpnp_pon_store_shipmode_info(RESET_SHIPMODE_INFO_SHPMOD_REASON,
+					RESET_SHIPMODE_INFO_SHPMOD_REASON)) {
+		dev_warn(&pdev->dev, "Failed to set pon Shipmode\n");
+		return;
+	}
+
+	rc = qpnp_rtc_read_time(&pdev->dev, &rtc_tm);
+	if (rc) {
+		dev_err(&pdev->dev, "Unable to read RTC time for Shipmode\n");
+		return;
+	}
+
+	rtc_tm_to_time(&rtc_tm, &secs_rtc);
+	dev_warn(&pdev->dev, "Shipmode current time %ld secs\n", secs_rtc);
+	secs_rtc += shipmode_delay;
+	shipmode_alarm.enabled = 1;
+	rtc_time_to_tm(secs_rtc, &shipmode_alarm.time);
+	dev_warn(&pdev->dev, "Setup Shipmode trigger %ld secs\n", secs_rtc);
+	qpnp_rtc_set_alarm(&pdev->dev, &shipmode_alarm);
 }
 
 static const struct of_device_id spmi_match_table[] = {
