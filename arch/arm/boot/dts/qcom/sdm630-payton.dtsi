@@ -15,11 +15,6 @@
 #include "sdm660-camera-sensor-mot-payton.dtsi"
 #include "dsi-panel-mot-tianma-520-1080p-vid.dtsi"
 #include "dsi-panel-mot-boe-520-1080p-vid.dtsi"
-/ {
-        model = "Payton";
-        compatible = "qcom,sdm630-payton", "qcom,sdm630-moto",
-                        "qcom,sdm630";
-};
 
 &i2c_2 { /* BLSP1 CAP SENSOR */
 	status = "okay";

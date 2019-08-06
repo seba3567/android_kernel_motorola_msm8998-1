@@ -17,6 +17,9 @@
 #include "sdm660-paytonpro.dtsi"
 
 / {
+	model = "sdm660 Paytonpro p0a";
+	compatible = "qcom,sdm630-payton", "qcom,sdm630-moto",
+	                "qcom,sdm630";
 	qcom,board-id = <0x43 0x80A0>;
 };
 

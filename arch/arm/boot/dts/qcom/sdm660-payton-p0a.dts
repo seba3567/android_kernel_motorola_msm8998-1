@@ -17,7 +17,10 @@
 #include "sdm660-payton.dtsi"
 
 / {
-        qcom,board-id = <0x41 0x80A0>;
+	model = "sdm660 Payton p0a";
+	compatible = "qcom,sdm630-payton", "qcom,sdm630-moto",
+	                "qcom,sdm630";
+	    qcom,board-id = <0x41 0x80A0>;
 };
 
 /* workaround, GPIO2 used as codec interrupt pin in this revison, to be revised

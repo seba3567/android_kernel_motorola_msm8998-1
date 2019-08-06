@@ -17,7 +17,10 @@
 #include "sdm630-payton.dtsi"
 
 / {
-        qcom,board-id = <0x41 0x82A0>,<0x42 0x82A0>;
+	model = "sdm630 Payton p2a";
+	compatible = "qcom,sdm630-payton", "qcom,sdm630-moto",
+	                "qcom,sdm630";
+	    qcom,board-id = <0x41 0x82A0>,<0x42 0x82A0>;
 };
 
 &i2c_2 { /* BLSP1 CAP SENSOR */
