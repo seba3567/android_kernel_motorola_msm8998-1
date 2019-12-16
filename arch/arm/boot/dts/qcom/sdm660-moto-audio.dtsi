@@ -233,7 +233,7 @@
 };
 
 &spi_7 {
-	status = "ok";
+	status = "disabled";
 	cs47l35: cs47l35@0 {
 		compatible = "cirrus,cs47l35";
 		spi-max-frequency = <26000000>;
@@ -286,33 +286,6 @@
 			0 0 0 0
 		>;
 		cirrus,out-mono = <0 0 0 0 0 0>;
-
-		cirrus,accdet {
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			acc@1 {
-				reg = <1>;
-
-				cirrus,micd-detect-debounce-ms = <600>;
-				cirrus,micd-bias-start-time = <8>;
-				cirrus,micd-rate = <6>;
-				cirrus,jd-check-jd2;
-				cirrus,report-to-input;
-				cirrus,micd-dbtime = <0x1>;
-				cirrus,micd-ranges = <
-					100 226  /* HEADSETHOOK  */
-					150 582  /* VOICE_ASSIST */
-					295 115  /* VOLUME_UP    */
-					1257 114 /* VOLUME_DOWN  */
-				>;
-				cirrus,micd-configs = <
-					0 1 2 0 0
-				>;
-				cirrus,micd-clamp-mode = <0x4>;
-				cirrus,gpsw = <1>;
-			};
-		};
 
 		adsps {
 			#address-cells = <1>;
