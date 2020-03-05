@@ -14,30 +14,18 @@
 #include "slimport.h"
 #include "slimport_tx_drv.h"
 #include "slimport_tx_reg.h"
-#include <video/slimport_device.h>
-#include <linux/pinctrl/consumer.h>
-#include <linux/clk.h>
-#include <linux/completion.h>
-#include <linux/debugfs.h>
-#include <linux/seq_file.h>
+#include <linux/platform_data/slimport_device.h>
 #ifdef QUICK_CHARGE_SUPPORT
 #include "quick_charge.h"
 #endif
 
-#include <linux/mod_display.h>
-#include <linux/mod_display_ops.h>
-
-#define MML_DYNAMIC_IRQ_SUPPORT 1
-
 #ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-#include "../../msm/mdss_hdmi_slimport.h"
+#include "../../msm/mdss/mdss_hdmi_slimport.h"
 #endif
 
-#ifdef SP_REGISTER_SET_TEST
 /* Enable or Disable HDCP by default */
 /* hdcp_enable = 1: Enable,  0: Disable */
 static int hdcp_enable = 1;
-#endif
 
 /* HDCP switch for external block*/
 /* external_block_en = 1: enable, 0: disable*/
@@ -45,7 +33,6 @@ int external_block_en = 1;
 
 /* to access global platform data */
 static struct anx7816_platform_data *g_pdata;
-static struct anx7816_data *g_data;
 
 /* Use device tree structure data when defined "CONFIG_OF"  */
 /*#define CONFIG_OF
@@ -70,19 +57,10 @@ unchar val_SP_TX_LT_CTRL_REG18;
 #define TRUE 1
 #define FALSE 0
 
-static int slimport7816_avdd_power(unsigned int onoff);
-static int anx7816_enable_irq(int enable);
+/*static int slimport7816_avdd_power(unsigned int onoff);
+static int slimport7816_dvdd_power(unsigned int onoff);*/
 
 struct i2c_client *anx7816_client;
-
-#define ANX_PINCTRL_STATE_DEFAULT "anx_default"
-#define ANX_PINCTRL_STATE_SLEEP  "anx_sleep"
-
-struct anx7816_pinctrl_res {
-	struct pinctrl *pinctrl;
-	struct pinctrl_state *gpio_state_active;
-	struct pinctrl_state *gpio_state_suspend;
-};
 
 struct anx7816_platform_data {
 	int gpio_p_dwn;
@@ -91,21 +69,11 @@ struct anx7816_platform_data {
 	int gpio_v10_ctrl;
 	int gpio_v33_ctrl;
 	int external_ldo_control;
-	int (*avdd_power)(unsigned int onoff);
-	int (*dvdd_power)(unsigned int onoff);
-	struct regulator *avdd_33;
+	/*int (*avdd_power)(unsigned int onoff);
+	int (*dvdd_power)(unsigned int onoff);*/
+	struct regulator *avdd_10;
 	struct regulator *dvdd_10;
-	struct regulator *vdd_18;
 	spinlock_t lock;
-	struct clk *mclk;
-	struct anx7816_pinctrl_res pin_res;
-	struct pinctrl *pinctrl;
-	struct pinctrl_state *hdmi_pinctrl_active;
-	struct pinctrl_state *hdmi_pinctrl_suspend;
-	struct platform_device *hdmi_pdev;
-	bool cbl_det_irq_enabled;
-	struct mutex sp_tx_power_lock;
-	bool sp_tx_power_state;
 };
 
 struct anx7816_data {
@@ -114,10 +82,6 @@ struct anx7816_data {
 	struct workqueue_struct *workqueue;
 	struct mutex lock;
 	struct wake_lock slimport_lock;
-	atomic_t slimport_connected;
-	struct completion connect_wait;
-	struct completion video_stable_wait;
-	struct dentry *debugfs;
 };
 
 struct msm_hdmi_slimport_ops *hdmi_slimport_ops;
@@ -154,58 +118,6 @@ void slimport_set_hdmi_hpd(int on)
 }
 #endif
 
-static int anx7816_pinctrl_rst_set_state(bool active)
-{
-	struct anx7816_platform_data *pdata = g_pdata;
-	struct pinctrl_state *pin_state;
-	int rc = -EFAULT;
-
-	if (IS_ERR_OR_NULL(pdata->pin_res.pinctrl))
-		return PTR_ERR(pdata->pin_res.pinctrl);
-
-	pin_state = active ? pdata->pin_res.gpio_state_active
-				: pdata->pin_res.gpio_state_suspend;
-
-	if (!IS_ERR_OR_NULL(pin_state)) {
-		rc = pinctrl_select_state(pdata->pin_res.pinctrl, pin_state);
-		if (rc)
-			pr_err("%s %s: can not set %s pin\n", LOG_TAG, __func__,
-					active ? ANX_PINCTRL_STATE_DEFAULT
-					: ANX_PINCTRL_STATE_SLEEP);
-	} else
-		pr_err("%s %s: invalid '%s' pinstate\n", LOG_TAG, __func__,
-					active ? ANX_PINCTRL_STATE_DEFAULT
-					: ANX_PINCTRL_STATE_SLEEP);
-
-	return rc;
-}
-
-static int anx7816_pinctrl_init(struct device *dev,
-				struct anx7816_platform_data *pdata)
-{
-	pdata->pin_res.pinctrl = devm_pinctrl_get(dev);
-	if (IS_ERR_OR_NULL(pdata->pin_res.pinctrl)) {
-		pr_err("%s %s: failed to get pinctrl for reset\n",
-						LOG_TAG, __func__);
-		return PTR_ERR(pdata->pin_res.pinctrl);
-	}
-
-	pdata->pin_res.gpio_state_active
-			= pinctrl_lookup_state(pdata->pin_res.pinctrl,
-						ANX_PINCTRL_STATE_DEFAULT);
-	if (IS_ERR_OR_NULL(pdata->pin_res.gpio_state_active))
-		pr_warn("%s %s: can not get default pinstate\n",
-						LOG_TAG, __func__);
-
-	pdata->pin_res.gpio_state_suspend
-			= pinctrl_lookup_state(pdata->pin_res.pinctrl,
-						ANX_PINCTRL_STATE_SLEEP);
-	if (IS_ERR_OR_NULL(pdata->pin_res.gpio_state_suspend))
-		pr_warn("%s %s: can not get sleep pinstate\n",
-						LOG_TAG, __func__);
-
-	return 0;
-}
 
 #ifdef QUICK_CHARGE_SUPPORT
 extern struct blocking_notifier_head *get_notifier_list_head(void);
@@ -228,17 +140,18 @@ bool slimport_dongle_is_connected(void)
 	if (!pdata)
 		return false;
 
-	if (gpio_get_value(pdata->gpio_cbl_det) == DONGLE_CABLE_INSERT) {
-		/*gpio_get_value_cansleep(pdata->gpio_cbl_det)*/
-		pr_debug("%s %s : Slimport Dongle is detected\n",
+	if (gpio_get_value(pdata->gpio_cbl_det) == DONGLE_CABLE_INSERT
+			/*gpio_get_value_cansleep(pdata->gpio_cbl_det)*/) {
+			pr_info("%s %s : Slimport Dongle is detected\n",
 				LOG_TAG, __func__);
-		result = true;
-	}
+			result = true;
+		}
 
 	return result;
 }
 
-static int slimport7816_avdd_power(unsigned int onoff)
+
+/*static int slimport7816_avdd_power(unsigned int onoff)
 {
 #ifdef CONFIG_OF
 	struct anx7816_platform_data *pdata = g_pdata;
@@ -246,50 +159,23 @@ static int slimport7816_avdd_power(unsigned int onoff)
 	struct anx7816_platform_data *pdata = anx7816_client->dev.platform_data;
 #endif
 	int rc = 0;
-
+*/
+/* To do : regulator control after H/W change */
+/*	return rc;
 	if (onoff) {
-		pr_debug("%s %s: avdd power on\n", LOG_TAG, __func__);
-		rc = regulator_enable(pdata->avdd_33);
+		pr_info("%s %s: avdd power on\n", LOG_TAG, __func__);
+		rc = regulator_enable(pdata->avdd_10);
 		if (rc < 0) {
 			pr_err("%s %s: failed to enable avdd regulator rc=%d\n",
-						LOG_TAG, __func__, rc);
-			goto err;
-		}
-
-		rc = regulator_enable(pdata->vdd_18);
-		if (rc < 0) {
-			pr_err("%s %s: failed to enable vdd_18 reg. rc=%d\n",
-						LOG_TAG, __func__, rc);
-			goto err_vdd_18;
+			       LOG_TAG, __func__, rc);
 		}
 	} else {
-		int tmp = 0;
-
-		pr_debug("%s %s: avdd power off\n", LOG_TAG, __func__);
-
-		rc = regulator_disable(pdata->vdd_18);
-		if (rc < 0) {
-			pr_err("%s %s: failed to disable vdd_18 reg. rc=%d\n",
-						LOG_TAG, __func__, rc);
-			tmp = rc;
-		}
-
-		rc = regulator_disable(pdata->avdd_33);
-		if (rc < 0) {
-			pr_err("%s %s: failed to disable avdd reg. rc=%d\n",
-						LOG_TAG, __func__, rc);
-			tmp = rc;
-		}
-
-		rc = tmp;
+		pr_info("%s %s: avdd power off\n", LOG_TAG, __func__);
+		rc = regulator_disable(pdata->avdd_10);
 	}
 
 	return rc;
-err_vdd_18:
-	regulator_disable(pdata->avdd_33);
-err:
-	return rc;
-}
+}*/
 
 /*static int slimport7816_dvdd_power(unsigned int onoff)
 {
@@ -317,7 +203,6 @@ err:
 	return rc;
 }*/
 
-#ifdef SP_REGISTER_SET_TEST
 ssize_t slimport7816_rev_check_store(struct device *dev,
 					struct device_attribute *attr,
 					const char *buf, size_t count)
@@ -351,7 +236,7 @@ ssize_t sp_hdcp_feature_store(struct device *dev,
 	if (ret)
 		return ret;
 	hdcp_enable = val;
-	pr_debug(" hdcp_enable = %d\n", hdcp_enable);
+	pr_info(" hdcp_enable = %d\n", hdcp_enable);
 	return count;
 }
 
@@ -425,7 +310,7 @@ ssize_t anx7730_write_reg_store(struct device *dev,
 	switch (op) {
 	case 0x30:		/* "0" -> read */
 		i2c_master_read_reg(id, reg, &tmp);
-		pr_debug("%s: anx7730 read(%d,0x%x)= 0x%x\n", LOG_TAG, id, reg,
+		pr_info("%s: anx7730 read(%d,0x%x)= 0x%x\n", LOG_TAG, id, reg,
 			tmp);
 		break;
 
@@ -435,7 +320,7 @@ ssize_t anx7730_write_reg_store(struct device *dev,
 
 		i2c_master_write_reg(id, reg, val);
 		i2c_master_read_reg(id, reg, &tmp);
-		pr_debug("%s: anx7730 write(%d,0x%x,0x%x)\n", LOG_TAG, id, reg,
+		pr_info("%s: anx7730 write(%d,0x%x,0x%x)\n", LOG_TAG, id, reg,
 			tmp);
 		break;
 
@@ -519,7 +404,7 @@ static ssize_t anx7816_write_reg_store(struct device *dev,
 	switch (op) {
 	case 0x30:		/* "0" -> read */
 		sp_read_reg(id, reg, &tmp);
-		pr_debug("%s: anx7816 read(0x%x,0x%x)= 0x%x\n", LOG_TAG, id,
+		pr_info("%s: anx7816 read(0x%x,0x%x)= 0x%x\n", LOG_TAG, id,
 			reg, tmp);
 		break;
 
@@ -529,8 +414,8 @@ static ssize_t anx7816_write_reg_store(struct device *dev,
 
 		sp_write_reg(id, reg, val);
 		sp_read_reg(id, reg, &tmp);
-		pr_debug("%s: anx7816 write(0x%x,0x%x,0x%x)\n",
-						LOG_TAG, id, reg, tmp);
+		pr_info("%s: anx7816 write(0x%x,0x%x,0x%x)\n", LOG_TAG, id, reg,
+			tmp);
 		break;
 
 	default:
@@ -559,7 +444,7 @@ static ssize_t anx_dpcd_store(struct device *dev,
 	case 0x30:
 		/*read*/
 		sp_tx_aux_dpcdread_bytes(0, 5, reg, 1, &tmp);
-		pr_debug("%s: anx7816 read(0x05,0x%x)= 0x%x\n", LOG_TAG,
+		pr_info("%s: anx7816 read(0x05,0x%x)= 0x%x\n", LOG_TAG,
 			reg, tmp);
 		break;
 	case 0x31:
@@ -568,7 +453,7 @@ static ssize_t anx_dpcd_store(struct device *dev,
 		write_val = simple_strtoul(val, NULL, 16);
 		sp_tx_aux_dpcdwrite_bytes(0, 5, reg, 1, &write_val);
 		sp_tx_aux_dpcdread_bytes(0, 5, reg, 1, &tmp);
-		pr_debug("%s: anx7816 write(0x05,0x%x,0x%x)= 0x%x\n", LOG_TAG,
+		pr_info("%s: anx7816 write(0x05,0x%x,0x%x)= 0x%x\n", LOG_TAG,
 			reg, write_val,	tmp);
 		break;
 	}
@@ -576,6 +461,7 @@ static ssize_t anx_dpcd_store(struct device *dev,
 }
 
 
+#ifdef SP_REGISTER_SET_TEST	/*//Slimport test*/
 /*sysfs read interface*/
 static ssize_t ctrl_reg0_show(struct device *dev,
 			struct device_attribute *attr, char *buf)
@@ -816,98 +702,8 @@ static ssize_t ctrl_reg18_store(struct device *dev,
 	return count;
 }
 #endif
-
-#ifdef MML_DYNAMIC_IRQ_SUPPORT
-/* sysfs interface : Dynamic IRQ Enable Manual Control */
-ssize_t sp_irq_enable_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct anx7816_data *anx7816;
-
-	if (!g_data) {
-		pr_err("%s: g_data is not set\n", __func__);
-		return -ENODEV;
-	} else
-		anx7816 = g_data;
-
-	return snprintf(buf, PAGE_SIZE, "%d\n",
-				anx7816->pdata->cbl_det_irq_enabled);
-}
-
-ssize_t sp_irq_enable_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	int ret;
-	long val;
-
-	ret = kstrtol(buf, 10, &val);
-	if (ret)
-		return ret;
-
-	if (val != !!val)
-		pr_err("%s: Invalid input: %s (%ld)\n", __func__, buf, val);
-	else
-		anx7816_enable_irq(val);
-
-	return count;
-}
-#endif
-
-static ssize_t tx_system_status_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int link_status = get_tx_system_state();
-	/* Force video stable complete when factory mode. */
-	/* If playing video while mydp test, we can get video stable when Edsel connected.*/
-	/* Otherwise handle_connect fail to get video_stable_wait when Edsel connected */
-	/* Since whether playing video do not affect reading video resolution, we keep this workaroud */
-	/* and do not play video when in mydp test */
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-	slimport_complete_video_stable();
-#endif
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", link_status);
-}
-
-static ssize_t tx_audio_status_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int audio_status = get_tx_audio_state();
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", audio_status);
-}
-
-static ssize_t tx_video_status_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int video_status = get_tx_video_state();
-	/* Ensure video stable complete in case start waiting vide stable too late*/
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-	slimport_complete_video_stable();
-#endif
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", video_status);
-}
-
-static ssize_t tx_system_status_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	pr_info("%s %s:  not neccesorry to be  implemented\n", LOG_TAG, __func__);
-	return 0;
-}
-
-static ssize_t tx_audio_status_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	pr_info("%s %s:  not neccesorry to be  implemented\n", LOG_TAG, __func__);
-	return 0;
-}
-
-static ssize_t tx_video_status_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	pr_info("%s %s:  not neccesorry to be  implemented\n", LOG_TAG, __func__);
-	return 0;
-}
-
 /* for debugging */
 static struct device_attribute slimport_device_attrs[] = {
-#ifdef SP_REGISTER_SET_TEST
 	__ATTR(rev_check, S_IRUGO | S_IWUSR, NULL,
 	       slimport7816_rev_check_store),
 	__ATTR(hdcp, S_IRUGO | S_IWUSR, sp_hdcp_feature_show,
@@ -917,6 +713,7 @@ static struct device_attribute slimport_device_attrs[] = {
 	__ATTR(anx7730, S_IRUGO | S_IWUSR, NULL, anx7730_write_reg_store),
 	__ATTR(anx7816, S_IRUGO | S_IWUSR, NULL, anx7816_write_reg_store),
 	__ATTR(DPCD, S_IRUGO | S_IWUSR, NULL, anx_dpcd_store),
+#ifdef SP_REGISTER_SET_TEST	/*//slimport test*/
 	__ATTR(ctrl_reg0, S_IRUGO | S_IWUSR, ctrl_reg0_show, ctrl_reg0_store),
 	__ATTR(ctrl_reg10, S_IRUGO | S_IWUSR, ctrl_reg10_show,
 	       ctrl_reg10_store),
@@ -936,14 +733,6 @@ static struct device_attribute slimport_device_attrs[] = {
 	__ATTR(ctrl_reg18, S_IRUGO | S_IWUSR, ctrl_reg18_show,
 	       ctrl_reg18_store),
 #endif
-#ifdef MML_DYNAMIC_IRQ_SUPPORT
-	__ATTR(irq_enable, S_IRUGO | S_IWUSR, sp_irq_enable_show,
-		sp_irq_enable_store),
-#endif
-	__ATTR(audio_status, S_IRUGO | S_IWUSR, tx_audio_status_show, tx_audio_status_store),
-	__ATTR(sys_status, S_IRUGO | S_IWUSR, tx_system_status_show, tx_system_status_store),
-	__ATTR(video_status, S_IRUGO | S_IWUSR, tx_video_status_show, tx_video_status_store),
-
 };
 
 static int create_sysfs_interfaces(struct device *dev)
@@ -958,134 +747,6 @@ error:
 		device_remove_file(dev, &slimport_device_attrs[i]);
 	pr_err("%s %s: Unable to create interface", LOG_TAG, __func__);
 	return -EINVAL;
-}
-
-static int remove_sysfs_interfaces(struct device *dev)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(slimport_device_attrs); i++)
-		device_remove_file(dev, &slimport_device_attrs[i]);
-	return 0;
-}
-
-struct slave_info {
-	const char *name;
-	uint8_t addr;
-};
-
-static struct slave_info anx7816_reg_dump_slave_info[] = {
-	{.name = "TX_P0", .addr = TX_P0},
-	{.name = "TX_P1", .addr = TX_P1},
-	{.name = "TX_P2", .addr = TX_P2},
-	{.name = "RX_P0", .addr = RX_P0},
-	{.name = "RX_P1", .addr = RX_P1},
-};
-
-static void *anx7816_reg_dump_seq_start(struct seq_file *s, loff_t *pos)
-{
-	if (*pos >= ARRAY_SIZE(anx7816_reg_dump_slave_info))
-		return NULL;
-	return anx7816_reg_dump_slave_info + *pos;
-}
-
-static void *anx7816_reg_dump_seq_next(struct seq_file *s, void *v,
-				       loff_t *pos)
-{
-	if (++*pos >= ARRAY_SIZE(anx7816_reg_dump_slave_info))
-		return NULL;
-	return anx7816_reg_dump_slave_info + *pos;
-}
-
-static int anx7816_reg_dump_seq_show(struct seq_file *s, void *v)
-{
-	int i, j;
-	uint8_t offset = 0;
-	int rc = 0;
-	struct slave_info *slave_info = v;
-	struct anx7816_data *anx7816 = s->private;
-	struct anx7816_platform_data *pdata = anx7816->pdata;
-
-	mutex_lock(&pdata->sp_tx_power_lock);
-
-	seq_printf(s, "%s (0x%02X)", slave_info->name, slave_info->addr);
-
-	if (pdata->sp_tx_power_state) {
-		seq_puts(s, "\n   ");
-		for (i = 0; i < 16; i++)
-			seq_printf(s, "  %X", i);
-		for (i = 0; i < 16; i++) {
-			seq_printf(s, "\n%02X:", offset);
-			for (j = 0; j < 16; j++, offset++) {
-				uint8_t reg;
-
-				if (!rc)
-					rc = sp_read_reg(slave_info->addr,
-						offset, &reg);
-				if (!rc)
-					seq_printf(s, " %02x", reg);
-				else
-					seq_puts(s, " --");
-			}
-		}
-	} else {
-		seq_puts(s, "\nnot powered, skipping register reads");
-	}
-
-	seq_puts(s, "\n\n");
-
-	mutex_unlock(&pdata->sp_tx_power_lock);
-
-	return 0;
-}
-
-static void anx7816_reg_dump_seq_stop(struct seq_file *s, void *v)
-{
-}
-
-static const struct seq_operations anx7816_reg_dump_seq_ops = {
-	.start = anx7816_reg_dump_seq_start,
-	.next  = anx7816_reg_dump_seq_next,
-	.show  = anx7816_reg_dump_seq_show,
-	.stop  = anx7816_reg_dump_seq_stop,
-};
-
-static int anx7816_reg_dump_open(struct inode *inode, struct file *file)
-{
-	int rc = seq_open(file, &anx7816_reg_dump_seq_ops);
-
-	if (!rc) {
-		struct seq_file *seq = file->private_data;
-
-		seq->private = inode->i_private;
-	}
-	return rc;
-}
-
-static const struct file_operations anx7816_reg_dump_fops = {
-	.open    = anx7816_reg_dump_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.release = seq_release,
-};
-
-static int create_debugfs_interfaces(struct anx7816_data *anx7816)
-{
-	int rc = 0;
-	struct dentry *dentry = debugfs_create_file("anx7816_reg_dump",
-		S_IRUGO, NULL, anx7816, &anx7816_reg_dump_fops);
-
-	if (IS_ERR(dentry))
-		rc = PTR_ERR(dentry);
-	else
-		anx7816->debugfs = dentry;
-	return rc;
-}
-
-static void remove_debugfs_interfaces(struct anx7816_data *anx7816)
-{
-	debugfs_remove(anx7816->debugfs);
-	anx7816->debugfs = NULL;
 }
 
 int sp_read_reg_byte(uint8_t slave_addr, uint8_t offset)
@@ -1131,145 +792,49 @@ int sp_write_reg(uint8_t slave_addr, uint8_t offset, uint8_t value)
 	return ret;
 }
 
-static int anx7816_clk_start(struct anx7816_platform_data *pdata);
-static void anx7816_clk_stop(struct anx7816_platform_data *pdata);
-
 void sp_tx_hardware_poweron(void)
 {
-	int rc = 0;
 #ifdef CONFIG_OF
 	struct anx7816_platform_data *pdata = g_pdata;
 #else
 	struct anx7816_platform_data *pdata = anx7816_client->dev.platform_data;
 #endif
 
+	gpio_set_value(pdata->gpio_reset, 0);
+	mdelay(1);
+	if (pdata->external_ldo_control) {
+		/* Enable 1.0V LDO */
+		gpio_set_value(pdata->gpio_v10_ctrl, 1);
+		mdelay(1);
+	}
+	gpio_set_value(pdata->gpio_p_dwn, 0);
+	mdelay(1);
+	gpio_set_value(pdata->gpio_reset, 1);
 	pr_info("%s %s: anx7816 power on\n", LOG_TAG, __func__);
-
-	mutex_lock(&pdata->sp_tx_power_lock);
-
-	if (pdata->sp_tx_power_state) {
-		pr_warn("%s %s: already powered on!\n", LOG_TAG, __func__);
-		goto exit;
-	}
-
-	rc = anx7816_pinctrl_rst_set_state(true);
-	if (rc < 0) {
-		pr_err("%s %s: fail to set_state for reset. ret=%d\n",
-						LOG_TAG, __func__, rc);
-		goto exit;
-	}
-
-	if (gpio_is_valid(pdata->gpio_reset))
-		gpio_set_value(pdata->gpio_reset, 0);
-	usleep_range(1000, 1001);
-
-	if (gpio_is_valid(pdata->gpio_p_dwn))
-		gpio_set_value(pdata->gpio_p_dwn, 1);
-	usleep_range(2000, 2001);
-
-	rc = regulator_enable(pdata->dvdd_10);
-	if (rc < 0) {
-		pr_err("%s %s: failed to enable dvdd_10 regulator rc=%d\n",
-						LOG_TAG, __func__, rc);
-		goto err;
-	}
-	usleep_range(4500, 5000);
-
-	if (gpio_is_valid(pdata->gpio_p_dwn))
-		gpio_set_value(pdata->gpio_p_dwn, 0);
-	usleep_range(2000, 2001);
-
-	rc = anx7816_clk_start(pdata);
-	if (rc < 0) {
-		pr_err("%s %s: fail to start the dp_brdge_mclk. ret=%d\n",
-						LOG_TAG, __func__, rc);
-		goto err_vdd_10;
-	}
-	usleep_range(9000, 10000);
-
-/* pdata->check_slimport_connection = true; TODO.. where does this go? */
-
-	if (gpio_is_valid(pdata->gpio_reset))
-		gpio_set_value(pdata->gpio_reset, 1);
-
-	usleep_range(9000, 10000);
-
-	pdata->sp_tx_power_state = 1;
-
-	mutex_unlock(&pdata->sp_tx_power_lock);
-
-	return;
-
-err_vdd_10:
-	rc = regulator_disable(pdata->dvdd_10);
-	if (rc < 0)
-		pr_err("%s %s: fail to disable dvdd_10 regulator. rc=%d\n",
-						LOG_TAG, __func__, rc);
-err:
-	if (gpio_is_valid(pdata->gpio_reset))
-		gpio_set_value(pdata->gpio_reset, 0);
-
-	if (gpio_is_valid(pdata->gpio_p_dwn))
-		gpio_set_value(pdata->gpio_p_dwn, 1);
-
-	anx7816_pinctrl_rst_set_state(false);
-
-exit:
-	mutex_unlock(&pdata->sp_tx_power_lock);
 }
 
 void sp_tx_hardware_powerdown(void)
 {
-	int rc = -EFAULT;
 #ifdef CONFIG_OF
 	struct anx7816_platform_data *pdata = g_pdata;
 #else
 	struct anx7816_platform_data *pdata = anx7816_client->dev.platform_data;
 #endif
-	pr_info("%s %s: anx7816 power down\n", LOG_TAG, __func__);
 
-	mutex_lock(&pdata->sp_tx_power_lock);
-
-	if (!pdata->sp_tx_power_state) {
-		pr_warn("%s %s: already powered off!\n", LOG_TAG, __func__);
-		goto exit;
+	gpio_set_value(pdata->gpio_reset, 0);
+	mdelay(1);
+	if (pdata->external_ldo_control) {
+		gpio_set_value(pdata->gpio_v10_ctrl, 0);
+		mdelay(1);
 	}
+	gpio_set_value(pdata->gpio_p_dwn, 1);
+	mdelay(1);
 
-	if (gpio_is_valid(pdata->gpio_reset))
-		gpio_set_value(pdata->gpio_reset, 0);
-
-	usleep_range(1000, 1001);
-
-	anx7816_clk_stop(pdata);
-	usleep_range(2000, 2001);
-
-	regulator_disable(pdata->dvdd_10);
-	
-	usleep_range(2000, 2001);
-
-	/* pdata->check_slimport_connection = false;
-	 * TODO where does this go?
-	 */
-	if (gpio_is_valid(pdata->gpio_p_dwn))
-		gpio_set_value(pdata->gpio_p_dwn, 1);
-	usleep_range(1000, 1001);
-
-	rc = anx7816_pinctrl_rst_set_state(false);
-	if (rc < 0)
-		pr_err("%s %s: fail to set_state for reset. ret=%d\n",
-						LOG_TAG, __func__, rc);
-	usleep_range(1000, 1001);
-
-	pdata->sp_tx_power_state = 0;
-
-exit:
-	mutex_unlock(&pdata->sp_tx_power_lock);
+	pr_info("%s %s: anx7816 power down\n", LOG_TAG, __func__);
 }
 
 int slimport_read_edid_block(int block, uint8_t *edid_buf)
 {
-	pr_debug("%s is called\n", __func__);
-
 	if (block == 0) {
 		memcpy(edid_buf, edid_blocks, 128 * sizeof(char));
 	} else if (block == 1) {
@@ -1285,68 +850,79 @@ int slimport_read_edid_block(int block, uint8_t *edid_buf)
 
 static void anx7816_free_gpio(struct anx7816_data *anx7816)
 {
-/*      gpio_free(anx7816->pdata->gpio_int); */
-	if (gpio_is_valid(anx7816->pdata->gpio_reset))
-		gpio_free(anx7816->pdata->gpio_reset);
-	if (gpio_is_valid(anx7816->pdata->gpio_p_dwn))
-		gpio_free(anx7816->pdata->gpio_p_dwn);
-	if (gpio_is_valid(anx7816->pdata->gpio_cbl_det))
-		gpio_free(anx7816->pdata->gpio_cbl_det);
+	gpio_free(anx7816->pdata->gpio_cbl_det);
+	gpio_free(anx7816->pdata->gpio_reset);
+	gpio_free(anx7816->pdata->gpio_p_dwn);
+	if (anx7816->pdata->external_ldo_control) {
+		gpio_free(anx7816->pdata->gpio_v10_ctrl);
+		gpio_free(anx7816->pdata->gpio_v33_ctrl);
+	}
 }
 
 static int anx7816_init_gpio(struct anx7816_data *anx7816)
 {
 	int ret = 0;
 
-	pr_debug("%s %s: anx7816 init gpio\n", LOG_TAG, __func__);
+	pr_info("%s %s: anx7816 init gpio\n", LOG_TAG, __func__);
 	/*  gpio for chip power down  */
-	if (gpio_is_valid(anx7816->pdata->gpio_p_dwn)) {
-		ret = gpio_request(anx7816->pdata->gpio_p_dwn,
-						"anx7816_p_dwn_ctl");
-		if (ret) {
-			pr_err("%s : failed to request gpio %d\n", __func__,
-						anx7816->pdata->gpio_p_dwn);
-			goto out;
-		}
-		gpio_direction_output(anx7816->pdata->gpio_p_dwn, 1);
-	} else
-		pr_err("%s : Invalid gpio_p_dwn\n", __func__);
-
-	if (gpio_is_valid(anx7816->pdata->gpio_reset)) {
-		/*  gpio for chip reset  */
-		ret = gpio_request(anx7816->pdata->gpio_reset,
-						"anx7816_reset_n");
-		if (ret) {
-			pr_err("%s : failed to request gpio %d\n", __func__,
-					       anx7816->pdata->gpio_reset);
-			goto err0;
-		}
-		gpio_direction_output(anx7816->pdata->gpio_reset, 0);
-	} else
-		pr_err("%s : Invalid gpio_reset\n", __func__);
-
+	ret = gpio_request(anx7816->pdata->gpio_p_dwn, "anx7816_p_dwn_ctl");
+	if (ret) {
+		pr_err("%s : failed to request gpio %d\n", __func__,
+		       anx7816->pdata->gpio_p_dwn);
+		goto err0;
+	}
+	gpio_direction_output(anx7816->pdata->gpio_p_dwn, 1);
+	/*  gpio for chip reset  */
+	ret = gpio_request(anx7816->pdata->gpio_reset, "anx7816_reset_n");
+	if (ret) {
+		pr_err("%s : failed to request gpio %d\n", __func__,
+		       anx7816->pdata->gpio_reset);
+		goto err1;
+	}
+	gpio_direction_output(anx7816->pdata->gpio_reset, 0);
 	/*  gpio for slimport cable detect  */
-	if (gpio_is_valid(anx7816->pdata->gpio_cbl_det)) {
-		ret = gpio_request(anx7816->pdata->gpio_cbl_det,
-						"anx7816_cbl_det");
+	ret = gpio_request(anx7816->pdata->gpio_cbl_det, "anx7816_cbl_det");
+	if (ret) {
+		pr_err("%s : failed to request gpio %d\n", __func__,
+		       anx7816->pdata->gpio_cbl_det);
+		goto err2;
+	}
+	gpio_direction_input(anx7816->pdata->gpio_cbl_det);
+	/*  gpios for power control */
+	if (anx7816->pdata->external_ldo_control) {
+		/* V10 power control */
+		ret = gpio_request(anx7816->pdata->gpio_v10_ctrl,
+				   "anx7816_v10_ctrl");
 		if (ret) {
-			pr_err("%s : failed to request gpio %d\n", __func__,
-			       anx7816->pdata->gpio_cbl_det);
-			goto err1;
+			pr_err("%s : failed to request gpio %d\n",
+			       __func__, anx7816->pdata->gpio_v10_ctrl);
+			goto err3;
 		}
-		gpio_direction_input(anx7816->pdata->gpio_cbl_det);
-		gpio_export(anx7816->pdata->gpio_cbl_det, false);
-	} else
-		pr_err("%s : Invalid  gpio_cbl_det\n", __func__);
+		gpio_direction_output(anx7816->pdata->gpio_v10_ctrl, 0);
+		/* V33 power control */
+		ret = gpio_request(anx7816->pdata->gpio_v33_ctrl,
+				   "anx7816_v33_ctrl");
+		if (ret) {
+			pr_err("%s : failed to request gpio %d\n",
+			       __func__, anx7816->pdata->gpio_v33_ctrl);
+			goto err4;
+		}
+		gpio_direction_output(anx7816->pdata->gpio_v33_ctrl, 0);
+
+	}
 
 	goto out;
 
+err4:
+	gpio_free(anx7816->pdata->gpio_v33_ctrl);
+err3:
+	gpio_free(anx7816->pdata->gpio_v10_ctrl);
+err2:
+	gpio_free(anx7816->pdata->gpio_cbl_det);
 err1:
-	if (gpio_is_valid(anx7816->pdata->gpio_reset))
-		gpio_free(anx7816->pdata->gpio_reset);
+	gpio_free(anx7816->pdata->gpio_reset);
 err0:
-	if (gpio_is_valid(anx7816->pdata->gpio_p_dwn))
-		gpio_free(anx7816->pdata->gpio_p_dwn);
+	gpio_free(anx7816->pdata->gpio_p_dwn);
 out:
 	return ret;
 }
@@ -1388,8 +964,7 @@ void cable_disconnect(void *data)
 
 /*JIRA: CLD-110,
 Software patch for cable det pin has glitch before stable "High"*/
- /*#define CABLE_DET_PIN_HAS_GLITCH*/
-#define DEBOUNCING_DELAY_US 50000
+#define CABLE_DET_PIN_HAS_GLITCH
 static unsigned char confirmed_cable_det(void *data)
 {
 	struct anx7816_data *anx7816 = data;
@@ -1400,12 +975,11 @@ static unsigned char confirmed_cable_det(void *data)
 		if (gpio_get_value(anx7816->pdata->gpio_cbl_det)
 				== DONGLE_CABLE_INSERT)
 			cable_det_count++;
-		usleep_range(5000, 5001);
+		mdelay(5);
 	} while (count--);
 
 	return (cable_det_count > 5) ? 0 : 1;
 	#else
-	usleep_range(DEBOUNCING_DELAY_US, DEBOUNCING_DELAY_US + 1);
 	return gpio_get_value(anx7816->pdata->gpio_cbl_det);
 	#endif
 }
@@ -1414,32 +988,21 @@ static irqreturn_t anx7816_cbl_det_isr(int irq, void *data)
 {
 	struct anx7816_data *anx7816 = data;
 	int cable_connected = 0;
-
 	cable_connected = confirmed_cable_det(data);
-	pr_debug("%s %s : detect cable insertion, cable_connected = %d\n",
+	pr_info("%s %s : detect cable insertion, cable_connected = %d\n",
 					LOG_TAG, __func__, cable_connected);
-
 	if (cable_connected == DONGLE_CABLE_INSERT) {
-		if (!atomic_add_unless(&anx7816->slimport_connected, 1, 1))
-			goto out;
-
 		wake_lock(&anx7816->slimport_lock);
 #ifdef QUICK_CHARGE_SUPPORT
 		reset_process();
 #endif
 		pr_info("%s %s : detect cable insertion\n", LOG_TAG, __func__);
-		complete(&anx7816->connect_wait);
 		queue_delayed_work(anx7816->workqueue, &anx7816->work, 0);
 	} else {
-		if (!atomic_add_unless(&anx7816->slimport_connected, -1, 0))
-			goto out;
-
 		pr_info("%s %s : detect cable removal\n", LOG_TAG, __func__);
-		complete(&anx7816->connect_wait);
 		cable_disconnect(anx7816);
 		/*msleep(1000);*/
 	}
-out:
 	return IRQ_HANDLED;
 }
 
@@ -1465,73 +1028,54 @@ static void anx7816_work_func(struct work_struct *work)
 }
 
 #ifdef CONFIG_OF
-int anx7816_clk_get(struct device *dev, struct anx7816_platform_data *pdata)
-{
-	int rc = 0;
-
-	pdata->mclk = devm_clk_get(dev, "dp_bridge_mclk");
-	if (IS_ERR(pdata->mclk)) {
-		pr_err("%s: failed to get dp_brdge_mclk. ret =%d\n",
-						__func__, rc);
-		return PTR_ERR(pdata->mclk);
-	}
-
-	return rc;
-}
-
-static int anx7816_clk_start(struct anx7816_platform_data *pdata)
-{
-	int rc = 0;
-
-	rc = clk_prepare_enable(pdata->mclk);
-	if (rc)
-		pr_err("%s:failed to start dp_brdge_mclk. ret=%d\n",
-						__func__, rc);
-	return rc;
-}
-
-static void anx7816_clk_stop(struct anx7816_platform_data *pdata)
-{
-	clk_disable_unprepare(pdata->mclk);
-}
-
 int anx7816_regulator_configure(struct device *dev,
 				struct anx7816_platform_data *pdata)
 {
 	int rc = 0;
+/* To do : regulator control after H/W change */
+	return rc;
 
-	pr_debug("%s+\n", __func__);
+	pdata->avdd_10 = regulator_get(dev, "analogix,vdd_ana");
 
-	pdata->avdd_33 = regulator_get(dev, "analogix,vdd_33");
-	if (IS_ERR(pdata->avdd_33)) {
-		rc = PTR_ERR(pdata->avdd_33);
-		pr_err("%s : Regulator get failed avdd_33 rc=%d\n",
-							__func__, rc);
+	if (IS_ERR(pdata->avdd_10)) {
+		rc = PTR_ERR(pdata->avdd_10);
+		pr_err("%s : Regulator get failed avdd_10 rc=%d\n",
+		       __func__, rc);
 		return rc;
 	}
 
-	pdata->vdd_18 = regulator_get(dev, "analogix,vdd_18");
-	if (IS_ERR(pdata->vdd_18)) {
-		rc = PTR_ERR(pdata->vdd_18);
-		pr_err("%s : Regulator get failed vdd_18 rc=%d\n",
-							__func__, rc);
-		goto error_set_vtg_avdd_33;
+	if (regulator_count_voltages(pdata->avdd_10) > 0) {
+		rc = regulator_set_voltage(pdata->avdd_10, 1000000, 1000000);
+		if (rc) {
+			pr_err("%s : Regulator set_vtg failed rc=%d\n",
+			       __func__, rc);
+			goto error_set_vtg_avdd_10;
+		}
 	}
 
-	pdata->dvdd_10 = regulator_get(dev, "analogix,vdd_10");
+	pdata->dvdd_10 = regulator_get(dev, "analogix,vdd_dig");
 	if (IS_ERR(pdata->dvdd_10)) {
 		rc = PTR_ERR(pdata->dvdd_10);
 		pr_err("%s : Regulator get failed dvdd_10 rc=%d\n",
-							__func__, rc);
-		goto error_set_vtg_vdd_18;
+		       __func__, rc);
+		return rc;
+	}
+
+	if (regulator_count_voltages(pdata->dvdd_10) > 0) {
+		rc = regulator_set_voltage(pdata->dvdd_10, 1000000, 1000000);
+		if (rc) {
+			pr_err("%s : Regulator set_vtg failed rc=%d\n",
+			       __func__, rc);
+			goto error_set_vtg_dvdd_10;
+		}
 	}
 
 	return 0;
 
-error_set_vtg_vdd_18:
-	regulator_put(pdata->vdd_18);
-error_set_vtg_avdd_33:
-	regulator_put(pdata->avdd_33);
+error_set_vtg_dvdd_10:
+	regulator_put(pdata->dvdd_10);
+error_set_vtg_avdd_10:
+	regulator_put(pdata->avdd_10);
 
 	return rc;
 }
@@ -1541,58 +1085,53 @@ static int anx7816_parse_dt(struct device *dev,
 {
 	int rc = 0;
 	struct device_node *np = dev->of_node;
-	struct platform_device *sp_pdev = NULL;
-	struct device_node *sp_tx_node = NULL;
 
 	pdata->gpio_p_dwn =
 	    of_get_named_gpio_flags(np, "analogix,p-dwn-gpio", 0, NULL);
-	if (!gpio_is_valid(pdata->gpio_p_dwn))
-		pr_err("%s: Invalid p-dwn-gpio = %d\n",
-					__func__, pdata->gpio_p_dwn);
 
 	pdata->gpio_reset =
 	    of_get_named_gpio_flags(np, "analogix,reset-gpio", 0, NULL);
-	if (!gpio_is_valid(pdata->gpio_reset))
-		pr_err("%s: Invalid gpio_reset = %d\n",
-					__func__, pdata->gpio_reset);
 
 	pdata->gpio_cbl_det =
 	    of_get_named_gpio_flags(np, "analogix,cbl-det-gpio", 0, NULL);
 
-	pr_debug(
+	pr_info(
 	       "%s gpio p_dwn : %d, reset : %d,  gpio_cbl_det %d\n",
 	       LOG_TAG, pdata->gpio_p_dwn,
 	       pdata->gpio_reset, pdata->gpio_cbl_det);
+	/*
+	 * if "external-ldo-control" property is not exist, we
+	 * assume that it is used in board.
+	 * if don't use external ldo control,
+	 * please use "external-ldo-control=<0>" in dtsi
+	 */
+	rc = of_property_read_u32(np, "analogix,external-ldo-control",
+				  &pdata->external_ldo_control);
+	if (rc == -EINVAL)
+		pdata->external_ldo_control = 1;
 
-	/* parse phandle for hdmi tx */
-	sp_tx_node = of_parse_phandle(np, "qcom,hdmi-tx-map", 0);
-	if (!sp_tx_node) {
-		pr_err("%s %s: can't find hdmi phandle\n", LOG_TAG, __func__);
-		return -ENODEV;
+	if (pdata->external_ldo_control) {
+		pdata->gpio_v10_ctrl =
+		    of_get_named_gpio_flags(np, "analogix,v10-ctrl-gpio", 0,
+					    NULL);
+
+		pdata->gpio_v33_ctrl =
+		    of_get_named_gpio_flags(np, "analogix,v33-ctrl-gpio", 0,
+					    NULL);
+
+		pr_info("%s gpio_v10_ctrl %d avdd33-en-gpio %d\n",
+		       LOG_TAG, pdata->gpio_v10_ctrl, pdata->gpio_v33_ctrl);
 	}
 
-	sp_pdev = of_find_device_by_node(sp_tx_node);
-	if (!sp_pdev) {
-		pr_err("%s %s: can't find the device by node\n",
-							LOG_TAG, __func__);
-		return -ENODEV;
-	}
-
-	pdata->hdmi_pdev = sp_pdev;
-
-	if (anx7816_regulator_configure(dev, pdata) < 0) {
+	/*if (anx7816_regulator_configure(dev, pdata) < 0) {
 		pr_err("%s %s: parsing dt for anx7816 is failed.\n",
-						LOG_TAG, __func__);
+		       LOG_TAG, __func__);
 		return rc;
-	}
-
-	if (anx7816_clk_get(dev, pdata) < 0) {
-		pr_err("%s %s: failed to get clks\n", LOG_TAG, __func__);
-		return rc;
-	}
+	}*/
 
 	/* connects function nodes which are not provided with dts */
-	pdata->avdd_power = slimport7816_avdd_power;
+	/*pdata->avdd_power = slimport7816_avdd_power;
+	pdata->dvdd_power = slimport7816_dvdd_power;*/
 
 	return 0;
 }
@@ -1604,250 +1143,6 @@ static int anx7816_parse_dt(struct device *dev,
 }
 #endif
 
-int slimport_reset_standby(void)
-{
-	int ret = 0;
-	struct anx7816_data *anx7816;
-
-	if (!g_data) {
-		pr_err("%s: g_data is not set\n", __func__);
-		return -ENODEV;
-	}
-
-	anx7816 = g_data;
-
-	if (atomic_read(&anx7816->slimport_connected)) {
-		pr_err("%s: connected, not resetting!\n", __func__);
-		ret = -EBUSY;
-	} else if (gpio_get_value(anx7816->pdata->gpio_cbl_det) ==
-			DONGLE_CABLE_INSERT) {
-		pr_warn("%s: in cable detected state, resetting!\n", __func__);
-		sp_tx_hardware_poweron();
-		sp_tx_hardware_powerdown();
-
-		usleep_range(250000, 250001);
-
-		if (gpio_get_value(anx7816->pdata->gpio_cbl_det) ==
-				DONGLE_CABLE_INSERT) {
-			pr_err("%s: cable detected after reset!\n", __func__);
-			ret = -EAGAIN;
-		}
-	} else {
-		pr_debug("%s: already in standby, not resetting!\n", __func__);
-	}
-
-	return ret;
-}
-
-#ifdef MML_DYNAMIC_IRQ_SUPPORT
-static int anx7816_enable_irq(int enable)
-{
-	struct anx7816_data *anx7816;
-	int ret = 0;
-
-	pr_debug("%s+ (enable: %d)\n", __func__, enable);
-
-	if (!anx7816_client)
-		return -ENODEV;
-
-	if (!g_data) {
-		pr_err("%s: g_data is not set\n", __func__);
-		return -ENODEV;
-	} else
-		anx7816 = g_data;
-
-	if (enable && !anx7816->pdata->cbl_det_irq_enabled) {
-		ret = request_threaded_irq(anx7816_client->irq, NULL,
-				anx7816_cbl_det_isr,
-				IRQF_TRIGGER_RISING
-				| IRQF_TRIGGER_FALLING
-				| IRQF_ONESHOT, "anx7816", anx7816);
-		if (ret < 0) {
-			pr_err("%s : failed to request irq\n", __func__);
-			goto exit;
-		}
-
-		anx7816->pdata->cbl_det_irq_enabled = true;
-	} else if (!enable && anx7816->pdata->cbl_det_irq_enabled) {
-		free_irq(anx7816_client->irq, anx7816);
-
-		anx7816->pdata->cbl_det_irq_enabled = false;
-	}
-
-exit:
-	return ret;
-}
-#endif
-
-static int slimport_mod_display_handle_available(void *data)
-{
-	struct anx7816_data *anx7816;
-
-	pr_debug("%s+\n", __func__);
-
-	anx7816 = (struct anx7816_data *)data;
-
-	pr_debug("%s-\n", __func__);
-
-	return 0;
-}
-
-static int slimport_mod_display_handle_unavailable(void *data)
-{
-	struct anx7816_data *anx7816;
-	int ret = 0;
-
-	pr_debug("%s+\n", __func__);
-
-	anx7816 = (struct anx7816_data *)data;
-
-	if (atomic_read(&anx7816->slimport_connected)) {
-		pr_err("%s: Slimport should not be connected!\n", __func__);
-		ret = -EBUSY;
-	}
-
-	pr_debug("%s-\n", __func__);
-
-	return ret;
-}
-
-static int slimport_mod_display_handle_connect(void *data)
-{
-	struct anx7816_data *anx7816;
-	int retries = 2;
-	int ret = 0;
-
-	pr_info("%s+\n", __func__);
-
-	anx7816 = (struct anx7816_data *)data;
-
-	reinit_completion(&anx7816->connect_wait);
-
-#ifdef MML_DYNAMIC_IRQ_SUPPORT
-	anx7816_enable_irq(1);
-#endif
-	mod_display_set_display_state(MOD_DISPLAY_ON);
-
-	while (!wait_for_completion_timeout(&anx7816->connect_wait,
-				msecs_to_jiffies(1000)) && retries) {
-		pr_warn("%s: Slimport not connected... Retries left: %d\n",
-					__func__, retries);
-		retries--;
-
-		/* Power cycle the chip here to work around cable detection
-		 * issues we've seen
-		 */
-		sp_tx_hardware_poweron();
-		sp_tx_hardware_powerdown();
-	}
-
-	if (!atomic_read(&anx7816->slimport_connected)) {
-		pr_warn("%s: Slimport failed to connect...\n", __func__);
-		ret = -ENODEV;
-		goto exit;
-	}
-
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-	/* Block this thread until HDMI video is stable
-	 * to void race condtion issue
-	*/
-	retries = 2;
-
-	pr_info("%s: Start to wait video stable\n", __func__);
-
-	while (!wait_for_completion_timeout(&anx7816->video_stable_wait,
-		msecs_to_jiffies(WAIT_VIDEO_STABLE_TIMEOUT)) && retries) {
-			pr_warn("%s: Video not stable... Retries left: %d\n",
-		__func__, retries);
-
-		retries--;
-	}
-
-	if (retries == 0)
-		pr_warn("%s: Video is not stable after waiting %ds.\n",
-			__func__, 2 * WAIT_VIDEO_STABLE_TIMEOUT / 1000);
-#endif
-
-exit:
-	pr_info("%s-\n", __func__);
-
-	return ret;
-}
-
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-void slimport_complete_video_stable(void)
-{
-
-	struct anx7816_data *anx7816;
-
-	pr_debug("%s+\n", __func__);
-
-	if (!g_data) {
-		pr_err("%s: g_data is not set\n", __func__);
-		return;
-	}
-
-	anx7816 = g_data;
-
-	complete(&anx7816->video_stable_wait);
-	pr_debug("%s-\n", __func__);
-}
-#endif
-
-static int slimport_mod_display_handle_disconnect(void *data)
-{
-	struct anx7816_data *anx7816;
-	int retries = 2;
-
-	pr_info("%s+\n", __func__);
-
-	anx7816 = (struct anx7816_data *)data;
-
-	reinit_completion(&anx7816->connect_wait);
-
-	mod_display_set_display_state(MOD_DISPLAY_OFF);
-
-	while (atomic_read(&anx7816->slimport_connected) &&
-			!wait_for_completion_timeout(&anx7816->connect_wait,
-			msecs_to_jiffies(1000)) && retries) {
-		pr_warn("%s: Slimport not disconnected... Retries left: %d\n",
-			__func__, retries);
-		retries--;
-	}
-
-
-#ifdef MML_DYNAMIC_IRQ_SUPPORT
-	anx7816_enable_irq(0);
-#endif
-
-	/* This should never happen, but just in case... */
-	if (atomic_add_unless(&anx7816->slimport_connected, -1, 0)) {
-		pr_err("%s %s : Slimport failed to disconnect... Force cable removal\n",
-			LOG_TAG, __func__);
-		cable_disconnect(anx7816);
-	}
-
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-	/*Block here until HDMI panel off*/
-	msm_hdmi_sync_slimport(anx7816->pdata->hdmi_pdev);
-#endif
-	pr_info("%s-\n", __func__);
-	return 0;
-}
-
-static struct mod_display_ops slimport_mod_display_ops = {
-	.handle_available = slimport_mod_display_handle_available,
-	.handle_unavailable = slimport_mod_display_handle_unavailable,
-	.handle_connect = slimport_mod_display_handle_connect,
-	.handle_disconnect = slimport_mod_display_handle_disconnect,
-	.data = NULL,
-};
-
-static struct mod_display_impl_data slimport_mod_display_impl = {
-	.mod_display_type = MOD_DISPLAY_TYPE_DP,
-	.ops = &slimport_mod_display_ops,
-};
-
 static int anx7816_i2c_probe(struct i2c_client *client,
 			     const struct i2c_device_id *id)
 {
@@ -1856,7 +1151,7 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 	struct anx7816_platform_data *pdata;
 	int ret = 0;
 
-	pr_debug("%s %s start\n", LOG_TAG, __func__);
+	pr_info("%s %s start\n", LOG_TAG, __func__);
 
 #ifdef SP_REGISTER_SET_TEST
 	val_SP_TX_LT_CTRL_REG0 = 0x19;
@@ -1907,7 +1202,6 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 
 	/* to access global platform data */
 	g_pdata = anx7816->pdata;
-	g_data = anx7816;
 
 	anx7816_client = client;
 
@@ -1915,13 +1209,6 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 
 	if (!anx7816->pdata) {
 		ret = -EINVAL;
-		goto err0;
-	}
-
-	ret = anx7816_pinctrl_init(&client->dev, pdata);
-	if (ret) {
-		pr_err("%s : failed to call pinctrl_init. ret = %d\n",
-							__func__, ret);
 		goto err0;
 	}
 
@@ -1939,12 +1226,8 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 		ret = -ENOMEM;
 		goto err1;
 	}
-	anx7816->pdata->avdd_power(1);
-/*	anx7816->pdata->dvdd_power(1);*/
-
-	anx7816->pdata->sp_tx_power_state = 0;
-	mutex_init(&anx7816->pdata->sp_tx_power_lock);
-	atomic_set(&anx7816->slimport_connected, 0);
+	/*anx7816->pdata->avdd_power(1);
+	anx7816->pdata->dvdd_power(1);*/
 
 	ret = anx7816_system_init();
 	if (ret) {
@@ -1952,7 +1235,6 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 		goto err2;
 	}
 
-	anx7816->pdata->cbl_det_irq_enabled = false;
 	client->irq = gpio_to_irq(anx7816->pdata->gpio_cbl_det);
 	if (client->irq < 0) {
 		pr_err("%s : failed to get gpio irq\n", __func__);
@@ -1962,7 +1244,6 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 	wake_lock_init(&anx7816->slimport_lock,
 		       WAKE_LOCK_SUSPEND, "slimport_wake_lock");
 
-#ifndef MML_DYNAMIC_IRQ_SUPPORT
 	ret = request_threaded_irq(client->irq, NULL, anx7816_cbl_det_isr,
 				   IRQF_TRIGGER_RISING
 				   | IRQF_TRIGGER_FALLING
@@ -1985,18 +1266,11 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 		pr_err("interrupt wake enable fail\n");
 		goto err3;
 	}
-#endif
 
 	ret = create_sysfs_interfaces(&client->dev);
 	if (ret < 0) {
 		pr_err("%s : sysfs register failed", __func__);
 		goto err3;
-	}
-
-	ret = create_debugfs_interfaces(anx7816);
-	if (ret < 0) {
-		pr_err("%s : debugfs register failed", __func__);
-		goto err4;
 	}
 
 	/*QC2.0*/
@@ -2023,21 +1297,12 @@ static int anx7816_i2c_probe(struct i2c_client *client,
 		}
 	}
 #endif
-	slimport_mod_display_ops.data = (void *)anx7816;
-	mod_display_register_impl(&slimport_mod_display_impl);
-	init_completion(&anx7816->connect_wait);
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-	init_completion(&anx7816->video_stable_wait);
-#endif
-	pr_debug("%s %s end\n", LOG_TAG, __func__);
+
+	pr_info("%s %s end\n", LOG_TAG, __func__);
 	goto exit;
 
-err4:
-	remove_sysfs_interfaces(&client->dev);
 err3:
-#ifndef MML_DYNAMIC_IRQ_SUPPORT
 	free_irq(client->irq, anx7816);
-#endif
 err2:
 	destroy_workqueue(anx7816->workqueue);
 err1:
@@ -2052,9 +1317,9 @@ exit:
 static int anx7816_i2c_remove(struct i2c_client *client)
 {
 	struct anx7816_data *anx7816 = i2c_get_clientdata(client);
-
-	remove_debugfs_interfaces(anx7816);
-	remove_sysfs_interfaces(&client->dev);
+	int i = 0;
+	for (i = 0; i < ARRAY_SIZE(slimport_device_attrs); i++)
+		device_remove_file(&client->dev, &slimport_device_attrs[i]);
 	pr_info("anx7816_i2c_remove\n");
 	sp_tx_clean_state_machine();
 	destroy_workqueue(anx7816->workqueue);
@@ -2082,64 +1347,24 @@ bool is_slimport_dp(void)
 	return (sp_tx_cur_cable_type() == DWN_STRM_IS_DIGITAL) ? TRUE : FALSE;
 }
 
-#define MHZ_TO_KHZ(freq) ((freq) * 1000)
-
-u32 sp_get_link_bandwidth_khz(unchar link_bandwidth)
+unchar sp_get_link_bw(void)
 {
-	u32 link_bandwidth_khz = 0;
-
-	switch (link_bandwidth) {
-	case LINK_1P62G:
-		link_bandwidth_khz = MHZ_TO_KHZ(1620);
-		break;
-	case LINK_2P7G:
-		link_bandwidth_khz = MHZ_TO_KHZ(2700);
-		break;
-	case LINK_5P4G:
-		link_bandwidth_khz = MHZ_TO_KHZ(5400);
-		break;
-	case LINK_6P75G:
-		link_bandwidth_khz = MHZ_TO_KHZ(6750);
-		break;
-	}
-	return link_bandwidth_khz;
+	return sp_tx_cur_bw();
 }
 
-unchar sp_get_link_bandwidth_limit_from_khz(u32 link_bandwidth_limit_khz)
+void sp_set_link_bw(unchar link_bw)
 {
-	if (link_bandwidth_limit_khz >= MHZ_TO_KHZ(6750))
-		return LINK_6P75G;
-	else if (link_bandwidth_limit_khz >= MHZ_TO_KHZ(5400))
-		return LINK_5P4G;
-	else if (link_bandwidth_limit_khz >= MHZ_TO_KHZ(2700))
-		return LINK_2P7G;
-	else if (link_bandwidth_limit_khz >= MHZ_TO_KHZ(1620))
-		return LINK_1P62G;
-	else
-		return 0;
+	sp_tx_set_bw(link_bw);
 }
 
-u32 sp_get_rx_bw_khz(void)
+static int anx7816_i2c_suspend(struct i2c_client *client, pm_message_t state)
 {
-	return sp_get_link_bandwidth_khz(sp_rx_cur_bw());
+	return 0;
 }
 
-/*
- * - Currently, QCOM's HDMI will use the RGB or Y420 format. Slimport will
- * also use the same QCOM's HDMI format to send to the downstream.
- * When the downstream is 4K device, and if the input format (from QCOM's HDMI)
- * is RGB, then it will enable the down scaling to YCbCr4:2:2 (2 byte-per-pixel)
- * from RGB (3 byte-per-pixel) so it can handle 4K's bandwidth.
- * - This API is using the same logic of sp_tx_bw_lc_sel() in slimport_tx_drv.c
- */
-unchar sp_get_link_byte_per_pixel(u32 pclk_khz)
+static int anx7816_i2c_resume(struct i2c_client *client)
 {
-	unchar bpp = 3;
-
-	if (pclk_khz > 224000)
-		bpp = 2;
-
-	return bpp;
+	return 0;
 }
 
 static const struct i2c_device_id anx7816_id[] = {
@@ -2166,6 +1391,8 @@ static struct i2c_driver anx7816_driver = {
 		   },
 	.probe = anx7816_i2c_probe,
 	.remove = anx7816_i2c_remove,
+	.suspend = anx7816_i2c_suspend,
+	.resume = anx7816_i2c_resume,
 	.id_table = anx7816_id,
 };
 

@@ -247,15 +247,6 @@
 #define RX_CEC_SPEED 0XD4
 #define CEC_SPEED_27M 0x40
 
-#define AUDIO_M_VID_0 0xD3
-#define AUDIO_M_VID_1 0xD4
-#define AUDIO_M_VID_2 0xD5
-#define AUDIO_N_VID_0 0xD6
-#define AUDIO_N_VID_1 0xD7
-#define AUDIO_N_VID_2 0xD8
-
-#define SP_AUDIO_TX_STATUS 0x3D
-
 #define HDMI_RX_HDMI_CRITERIA_REG 0XE1
 
 #define HDMI_RX_HDCP_EN_CRITERIA_REG 0XE2
@@ -737,8 +728,6 @@
 
 #define FW_VER_REG 0xB7
 
-#define VIDEO_PKG_LEN_H 0x1E
-#define VIDEO_PKG_LEN_L 0x1F
 
 /***************************************************************/
 /*Definition of DPCD*/
