@@ -13,15 +13,18 @@
  */
 
 #include "slimport_custom_declare.h"
-#include <linux/platform_data/slimport_device.h>
+#include <video/slimport_device.h>
 #ifdef QUICK_CHARGE_SUPPORT
 #include "quick_charge.h"
 #endif
+#include "slimport_tx_drv.h"
+#include <linux/slab.h>
+#include <linux/mod_display.h>
 
-#define SLIMPORT_DRV_DEBUG
+
 
 #ifndef XTAL_CLK_DEF
-#define XTAL_CLK_DEF XTAL_27M
+#define XTAL_CLK_DEF XTAL_19D2M
 #endif
 
 #define XTAL_CLK_M10 pXTAL_data[XTAL_CLK_DEF].xtal_clk_m10
@@ -33,6 +36,7 @@ static bool sp_tx_test_edid;
 
 //static unsigned char ext_int_index;
 static unsigned char g_changed_bandwidth;
+static unsigned char sp_rx_bandwidth;
 static unsigned char g_hdmi_dvi_status;
 
 static unsigned char g_need_clean_status;
@@ -50,7 +54,7 @@ static unsigned char g_read_edid_flag;
 #endif
 
 #define HDCP_REPEATER_MODE (__i2c_read_byte(RX_P1, 0x2A) & REPEATER_M)
-
+#define VO_FAILED_CNT_MAX 20
 
 static struct Packet_AVI sp_tx_packet_avi;
 static struct Packet_SPD sp_tx_packet_spd;
@@ -161,14 +165,14 @@ static void hdmi_rx_new_vsi_int(void);
 #define sp_tx_clean_hdcp_status() do{ \
 	sp_write_reg(TX_P0, TX_HDCP_CTRL0, 0x03); \
 	sp_write_reg_or(TX_P0, TX_HDCP_CTRL0, RE_AUTH); \
-	mdelay(2); \
-	pr_info("%s %s : sp_tx_clean_hdcp_status \n", LOG_TAG, __func__); \
+	usleep_range(2000, 2001); \
+	pr_debug("%s %s : sp_tx_clean_hdcp_status\n", LOG_TAG, __func__); \
 	}while(0)
 #define reg_hardware_reset() do{ \
 	sp_write_reg_or(TX_P2, SP_TX_RST_CTRL_REG, HW_RST); \
 	sp_tx_clean_state_machine(); \
 	sp_tx_set_sys_state(STATE_SP_INITIALIZED); \
-	mdelay(500); \
+	msleep(500); \
 	}while(0)
 #ifdef NEW_HDCP_CONTROL_LOGIC
 unsigned char g_hdcp_cap_bak;
@@ -191,7 +195,8 @@ unsigned char g_hdcp_cap_bak;
 
 #define sp_tx_set_sys_state(ss) \
 	do { \
-		pr_info("%s %s : set: clean_status: %x,\n ", LOG_TAG, __func__, (uint)g_need_clean_status); \
+		pr_debug("%s %s : set: clean_status: %x,\n ", \
+			LOG_TAG, __func__, (uint)g_need_clean_status); \
 		if((sp_tx_system_state >= STATE_LINK_TRAINING)&&(ss <STATE_LINK_TRAINING)) \
 			sp_write_reg_or(TX_P0, SP_TX_ANALOG_PD_REG, CH0_PD); \
 		sp_tx_system_state_bak = sp_tx_system_state; \
@@ -202,7 +207,8 @@ unsigned char g_hdcp_cap_bak;
 	
 #define goto_next_system_state() \
 	do { \
-		pr_info("%s %s : next: clean_status: %x,\n ", LOG_TAG, __func__, (uint)g_need_clean_status); \
+		pr_debug("%s %s : next: clean_status: %x,\n ", \
+			LOG_TAG, __func__, (uint)g_need_clean_status); \
 		sp_tx_system_state_bak = sp_tx_system_state; \
 		sp_tx_system_state++;\
 		print_sys_state(sp_tx_system_state); \
@@ -210,7 +216,8 @@ unsigned char g_hdcp_cap_bak;
 	
 #define redo_cur_system_state() \
 	do { \
-		pr_info("%s %s : redo: clean_status: %x,\n ", LOG_TAG, __func__, (uint)g_need_clean_status); \
+		pr_debug("%s %s : redo: clean_status: %x,\n ", \
+			LOG_TAG, __func__, (uint)g_need_clean_status); \
 		g_need_clean_status = 1; \
 		sp_tx_system_state_bak = sp_tx_system_state; \
 		print_sys_state(sp_tx_system_state); \
@@ -219,7 +226,8 @@ unsigned char g_hdcp_cap_bak;
 #define system_state_change_with_case(status) \
 	do{ \
 		if(sp_tx_system_state >= status) { \
-			pr_info("%s %s : change_case: clean_status: %xm,\n ", LOG_TAG, __func__, (uint)g_need_clean_status); \
+			pr_debug("%s %s : change_case: clean_status: %xm,\n ", \
+				LOG_TAG, __func__, (uint)g_need_clean_status); \
 			if((sp_tx_system_state >= STATE_LINK_TRAINING)&&(status <STATE_LINK_TRAINING)) \
 			sp_write_reg_or(TX_P0, SP_TX_ANALOG_PD_REG, CH0_PD); \
 			g_need_clean_status = 1; \
@@ -265,9 +273,10 @@ void wait_aux_op_finish(unchar * err_flag)
 	*err_flag = 0;
 	cnt = 150;
 	while (__i2c_read_byte(TX_P0, AUX_CTRL2) & AUX_OP_EN) {
-				mdelay(2);
+		usleep_range(2000, 2001);
 				if ((cnt--) == 0) {
-					pr_info("%s %s :aux operate failed!\n", LOG_TAG, __func__);
+					pr_err("%s %s :aux operate failed!\n",
+							LOG_TAG, __func__);
 					*err_flag = 1;
 					break;
 				}
@@ -342,7 +351,7 @@ unchar sp_tx_aux_dpcdread_bytes(unchar addrh, unchar addrm,
 	sp_write_reg(TX_P0, AUX_CTRL, c);
 	write_dpcd_addr(addrh, addrm, addrl);	
 	sp_write_reg_or(TX_P0, AUX_CTRL2, AUX_OP_EN);
-	mdelay(2);
+	usleep_range(2000, 2001);
 
 	wait_aux_op_finish(&bOK);
 	if (bOK == AUX_ERR) {
@@ -478,13 +487,9 @@ unchar sp_tx_cur_cable_type(void)
 {
 	return sp_tx_rx_type;
 }
-unchar sp_tx_cur_bw(void)
+unchar sp_rx_cur_bw(void)
 {
-	return g_changed_bandwidth;
-}
-void sp_tx_set_bw(unchar bw )
-{
-	g_changed_bandwidth = bw;
+	return sp_rx_bandwidth;
 }
 void sp_tx_variable_init(void)
 {
@@ -507,6 +512,7 @@ void sp_tx_variable_init(void)
 	sp_tx_vo_state = VO_WAIT_VIDEO_STABLE;
 	sp_tx_ao_state = AO_INIT;
 	g_changed_bandwidth = LINK_5P4G;
+	sp_rx_bandwidth = LINK_5P4G;
 	g_hdmi_dvi_status = HDMI_MODE;
 
 	sp_tx_test_lt = 0;
@@ -720,7 +726,7 @@ unchar is_cable_detected(void)
 	return slimport_dongle_is_connected();
 	/*
 	if(cable_detected()) {
-		mdelay(50);
+		msleep(50);
 		return cable_detected();		
 	}
 	return 0;
@@ -744,6 +750,7 @@ void slimport_waitting_cable_plug_process(void)
 		slimport_set_hdmi_hpd(0);
 #endif
 		hardware_power_ctl(0);
+	}
 }
 
 
@@ -759,7 +766,8 @@ static unchar sp_tx_get_cable_type(enum CABLE_TYPE_STATUS det_cable_type_state, 
 	downstream_charging_status = NO_CHARGING_CAPABLE;  // add for charging
 
 	aux_status = sp_tx_aux_dpcdread_bytes(0x00, 0x00, 0x05, 1, &ds_port_preset);
-	pr_info("%s %s : DPCD 0x005: %x \n", LOG_TAG, __func__, (int)ds_port_preset);
+	pr_debug("%s %s : DPCD 0x005: %x\n",
+			LOG_TAG, __func__, (int)ds_port_preset);
 	
 	switch(det_cable_type_state)
 	{
@@ -768,7 +776,7 @@ static unchar sp_tx_get_cable_type(enum CABLE_TYPE_STATUS det_cable_type_state, 
 				sp_tx_aux_dpcdread_bytes(0x00, 0x00, 0, 0x0c, data_buf);
 				det_cable_type_state = GETTED_CABLE_TYPE;
 			} else {				
-				mdelay(50);
+				msleep(50);
 				pr_err("%s %s :  AUX access error\n", LOG_TAG, __func__);
 				break;
 			}
@@ -776,7 +784,8 @@ static unchar sp_tx_get_cable_type(enum CABLE_TYPE_STATUS det_cable_type_state, 
 			switch ((ds_port_preset  & (_BIT1 | _BIT2) ) >>1) {
 			case 0x00:
 				cur_cable_type = DWN_STRM_IS_DIGITAL;
-				pr_info("%s %s : Downstream is DP dongle.\n", LOG_TAG, __func__);
+				pr_debug("%s %s : Downstream is DP dongle.\n",
+							LOG_TAG, __func__);
 				break;
 			case 0x01:
 			case 0x03:
@@ -788,7 +797,8 @@ static unchar sp_tx_get_cable_type(enum CABLE_TYPE_STATUS det_cable_type_state, 
 					//eeprom_reload(); 
 					msleep(150);
 				}
-				pr_info("%s %s : Downstream is general DP2VGA converter.\n", LOG_TAG, __func__);					
+				pr_debug("%s %s : Downstream is general DP2VGA converter.\n",
+							LOG_TAG, __func__);
 
 				break;
 			case 0x02:
@@ -799,7 +809,8 @@ static unchar sp_tx_get_cable_type(enum CABLE_TYPE_STATUS det_cable_type_state, 
 				}
 				//sp_tx_send_message(MSG_OCM_EN);
 				cur_cable_type = DWN_STRM_IS_HDMI;
-				pr_info("%s %s : Downstream is HDMI dongle.\n", LOG_TAG, __func__);
+				pr_debug("%s %s : Downstream is HDMI dongle.\n",
+						LOG_TAG, __func__);
 				
 				break;
 			default:
@@ -1027,7 +1038,8 @@ static unchar parse_edid_to_get_bandwidth(void)
 	i = 0;
 	while (4 > i && 0 != edid_blocks[0x36+desc_offset]) {
 		temp = get_edid_detail(edid_blocks+0x36+desc_offset);
-		pr_info("%s %s : bandwidth via EDID : %x\n", LOG_TAG, __func__, (uint)temp);
+		pr_debug("%s %s : bandwidth via EDID : %x\n",
+					LOG_TAG, __func__, (uint)temp);
 		if(bandwidth < temp)
 			bandwidth = temp;
 		if(bandwidth > LINK_5P4G)  
@@ -1060,7 +1072,7 @@ unchar sp_tx_get_edid_block(void)
 	sp_tx_aux_wr(0x7e);
 	sp_tx_aux_rd(0x01);
 	sp_read_reg(TX_P0, BUF_DATA_0, &c);
-	pr_info("%s %s : EDID Block = %d\n", LOG_TAG, __func__, (int)(c + 1));
+	pr_debug("%s %s : EDID Block = %d\n", LOG_TAG, __func__, (int)(c + 1));
 
 	if (c > 3)
 		c = 1;
@@ -1145,7 +1157,7 @@ static void segments_edid_read(unchar segment, unchar offset)
 	sp_read_reg(TX_P0, AUX_CTRL2, &c);
 	while(c&AUX_OP_EN)
 	{
-		mdelay(1);
+		usleep_range(1000, 1001);
 		cnt ++;
 		if(cnt == 10)
 		{
@@ -1170,7 +1182,7 @@ static void segments_edid_read(unchar segment, unchar offset)
 		sp_read_reg(TX_P0, BUF_DATA_COUNT, &c);
 		while((c & 0x1f) == 0)
 		{
-			mdelay(2);
+			usleep_range(2000, 2001);
 			cnt ++;
 			sp_read_reg(TX_P0, BUF_DATA_COUNT, &c);
 			if(cnt == 10)
@@ -1378,10 +1390,70 @@ void hdmi_rx_hdcp_cap(unsigned char hdcp_cap)
 #endif
 void slimport_edid_process(void)
 {
-	unchar temp_value, temp_value1;
+	unchar rx_bandwidth, tx_bandwidth;
 	unchar i;
+	struct mod_display_panel_config *display_config = NULL;
+	int ret;
 
-	pr_info("%s %s : edid_process\n", LOG_TAG, __func__);
+	pr_debug("%s %s : edid_process\n", LOG_TAG, __func__);
+
+	sp_tx_get_rx_bw(&rx_bandwidth);
+	pr_debug("%s %s : get rx bandwidth info = [%x]\n", LOG_TAG, __func__,
+		(uint)rx_bandwidth);
+	sp_rx_bandwidth = rx_bandwidth;
+
+	ret = mod_display_get_display_config(&display_config);
+	if (ret) {
+		pr_err("%s: Failed to get display config: %d\n", __func__, ret);
+		memset(edid_blocks, 0, 256);
+		return;
+	} else if (display_config->config_type == MOD_CONFIG_EDID_1_3) {
+		if (display_config->config_size > 256) {
+			pr_err("%s: EDID too big: %d\n", __func__,
+				display_config->config_size);
+		} else if (display_config->config_size == 0) {
+			pr_debug("%s: Reading EDID over HDMI link...\n",
+				__func__);
+		} else {
+			memcpy(edid_blocks, display_config->config_buf,
+				display_config->config_size);
+			goto skip_me;
+		}
+	} else if (display_config->config_type == MOD_CONFIG_EDID_DOWNSTREAM) {
+		if (display_config->config_size !=
+			sizeof(struct mod_display_downstream_config)) {
+			pr_err("%s: bad downstream config size: %d != %zu\n",
+			       __func__, display_config->config_size,
+			       sizeof(struct mod_display_downstream_config));
+		} else {
+			struct mod_display_downstream_config downstream_config;
+
+			memcpy(&downstream_config, display_config->config_buf,
+				sizeof(downstream_config));
+			if (downstream_config.max_link_bandwidth_khz) {
+				u32 link_bw_max_khz_orig =
+				       downstream_config.max_link_bandwidth_khz;
+				unchar link_bw_max =
+					sp_get_link_bandwidth_limit_from_khz(
+						link_bw_max_khz_orig);
+				u32 link_bw_max_khz = sp_get_link_bandwidth_khz(
+					link_bw_max);
+
+				pr_info("%s: limit rx bandwidth to %uKHz -> 0x%02x %uKHz\n",
+					__func__, link_bw_max_khz_orig,
+					link_bw_max, link_bw_max_khz);
+				rx_bandwidth = min(rx_bandwidth, link_bw_max);
+				sp_rx_bandwidth = rx_bandwidth;
+			}
+		}
+	} else {
+		pr_err("%s: Unknown display config type (%d)... Abort\n",
+			__func__, display_config->config_type);
+		memset(edid_blocks, 0, 256);
+		return;
+	}
+
+
 
 	if(g_read_edid_flag == 1){
 		if(check_with_pre_edid(edid_blocks))
@@ -1396,6 +1468,9 @@ void slimport_edid_process(void)
 			pr_err("%s %s : ERR:EDID corruption!\n", LOG_TAG, __func__);
 	}
 
+skip_me:
+	if (display_config)
+		kfree(display_config);
 
 	/*Release the HPD after the OTP loaddown*/
 	i = 10;
@@ -1404,7 +1479,7 @@ void slimport_edid_process(void)
 			break;
 		else{
 			pr_info("%s %s : waiting HDCP KEY loaddown \n", LOG_TAG, __func__);
-			mdelay(1);
+			usleep_range(1000, 1001);
 		}
 	}while(--i);	
 	sp_write_reg(RX_P0, HDMI_RX_INT_MASK1_REG, 0xe2);
@@ -1421,13 +1496,11 @@ void slimport_edid_process(void)
 		hdmi_rx_set_termination(1);
 	}
 
-	sp_tx_get_rx_bw(&temp_value);
-	temp_value1 = parse_edid_to_get_bandwidth();
-	if(temp_value <= temp_value1)		
-		temp_value1 = temp_value;
-	pr_info("%s %s : set link bw in edid %x \n", LOG_TAG, __func__, (uint)temp_value1);
-	//sp_tx_set_link_bw(temp_value1);
-	g_changed_bandwidth = temp_value1;	
+	tx_bandwidth = parse_edid_to_get_bandwidth();
+
+	g_changed_bandwidth = min(rx_bandwidth, tx_bandwidth);
+	pr_debug("%s %s : set link bw in edid %x\n", LOG_TAG, __func__,
+						(uint)g_changed_bandwidth);
 	/*
 	sp_tx_send_message(
 		(g_hdmi_dvi_status == HDMI_MODE) ? MSG_INPUT_HDMI : MSG_INPUT_DVI);
@@ -1629,7 +1702,7 @@ uint sp_tx_link_err_check(void)
 	unchar bytebuf[2];
 
 	sp_tx_aux_dpcdread_bytes(0x00, 0x02, 0x10, 2, bytebuf);
-	mdelay(5);
+	usleep_range(5000, 5001);
 	sp_tx_aux_dpcdread_bytes(0x00, 0x02, 0x10, 2, bytebuf);
 	errh = bytebuf[1];
 
@@ -1637,15 +1710,15 @@ uint sp_tx_link_err_check(void)
 		errl = bytebuf[0];
 		errh = (errh & 0x7f) << 8;
 		errl = errh + errl;
+		pr_err("%s %s :  Err of Lane = %d\n", LOG_TAG, __func__, errl);
 	}
 
-	pr_err("%s %s :  Err of Lane = %d\n", LOG_TAG, __func__, errl);
 	return errl;
 }
 static void serdes_fifo_reset(void)
 {
 	sp_write_reg_or(TX_P2, RST_CTRL2, SERDES_FIFO_RST);
-	mdelay(20);
+	msleep(20);
     sp_write_reg_and(TX_P2, RST_CTRL2, (~SERDES_FIFO_RST));
 }
 void slimport_link_training(void)
@@ -2067,6 +2140,9 @@ void sp_tx_config_packets(enum PACKETS_TYPE bType)
 void slimport_config_video_output(void)
 {
 	unchar temp_value;
+	static unchar wait_video_stable_fail_cnt;
+	static unchar wait_tx_video_stable_cnt;
+
 	switch(sp_tx_vo_state){
 		default:
 		case VO_WAIT_VIDEO_STABLE:
@@ -2087,17 +2163,30 @@ void slimport_config_video_output(void)
 			}
 			else 
 			{
-				pr_info("%s %s :HDMI input video not stable!\n", LOG_TAG, __func__);
+				pr_warn("%s %s :HDMI input video not stable!\n",
+							 LOG_TAG, __func__);
+				if (wait_video_stable_fail_cnt++ >=
+							VO_FAILED_CNT_MAX) {
+					pr_err("%s %s: stuck in VO_WAIT_VIDEO_STABLE. Count=%d.\n",
+						LOG_TAG, __func__,
+						wait_video_stable_fail_cnt);
+						vbus_power_ctrl(0);
+						reg_hardware_reset();
+						wait_video_stable_fail_cnt =  0;
+				}
+
 			}
 			SP_BREAK(VO_WAIT_VIDEO_STABLE, sp_tx_vo_state);
 	
 		case VO_WAIT_TX_VIDEO_STABLE:
+			wait_video_stable_fail_cnt = 0;
 			//DP TX video judge
 			sp_read_reg(TX_P0, SP_TX_SYS_CTRL2_REG, &temp_value);
 			sp_write_reg(TX_P0, SP_TX_SYS_CTRL2_REG, temp_value);
 			sp_read_reg(TX_P0, SP_TX_SYS_CTRL2_REG, &temp_value);
 			if(temp_value & CHA_STA) {
-				pr_info("%s %s : Stream clock not stable!\n", LOG_TAG, __func__);
+				pr_warn("%s %s : Stream clock not stable!\n",
+							LOG_TAG, __func__);
 			}else {
 				sp_read_reg(TX_P0, SP_TX_SYS_CTRL3_REG, &temp_value);
 				sp_write_reg(TX_P0, SP_TX_SYS_CTRL3_REG, temp_value);
@@ -2105,6 +2194,17 @@ void slimport_config_video_output(void)
 				if(!(temp_value & STRM_VALID))
 				{
 					pr_err("%s %s : video stream not valid!\n", LOG_TAG, __func__);
+
+					if (wait_tx_video_stable_cnt++ >=
+							VO_FAILED_CNT_MAX) {
+						pr_err("%s %s: Stuck in VO_WAIT_TX_VIDEO_STABLE. Count=%d.\n",
+						LOG_TAG, __func__,
+						wait_tx_video_stable_cnt);
+						vbus_power_ctrl(0);
+						reg_hardware_reset();
+						wait_tx_video_stable_cnt = 0;
+					}
+
 				} else{
 				#ifdef DEMO_4K_2K
 				if(down_sample_en)
@@ -2130,6 +2230,7 @@ void slimport_config_video_output(void)
 			SP_BREAK(VO_WAIT_PLL_LOCK, sp_tx_vo_state);
 			*/
 		case VO_CHECK_VIDEO_INFO:
+			wait_tx_video_stable_cnt = 0;
 			temp_value = __i2c_read_byte(RX_P0, HDMI_STATUS) & HDMI_MODE;
 			g_hdmi_dvi_status = read_dvi_hdmi_mode();
 			if (!sp_tx_bw_lc_sel(sp_tx_pclk_calc())
@@ -2268,7 +2369,7 @@ void slimport_hdcp_process(void)
 					ds_vid_stb_cntr = 0;
 				} else {
 					ds_vid_stb_cntr++;
-					mdelay(10);
+					usleep_range(10000, 10001);
 				}
 				#ifdef SLIMPORT_DRV_DEBUG
 				pr_info("%s %s : downstream video not stable\n", LOG_TAG, __func__); //for debug
@@ -2289,7 +2390,7 @@ void slimport_hdcp_process(void)
 		//sp_tx_video_mute(0);
 		//sp_tx_aux_polling_disable();
 		//sp_tx_clean_hdcp_status();
-		mdelay(50); 
+		msleep(50);
 		//disable auto polling during hdcp.
 		sp_tx_hw_hdcp_enable();
 		HDCP_state = HDCP_WAITTING_FINISH;
@@ -2404,13 +2505,14 @@ static void info_ANX7730_AUIF_changed(void)
 {
 	unchar temp, count;
 	unchar pBuf[3] = {0x01,0xd1,0x02};
-	msleep(20); 
+
+	usleep_range(20000, 20001);
 	if(sp_tx_rx_type == DWN_STRM_IS_HDMI) {//assuming it is anx7730
 		sp_tx_aux_dpcdread_bytes(0x00, 0x05, 0x23, 1, &temp);
 		if(temp < 0x94){
 			count = 3;
 			do{
-				 mdelay(20);
+				usleep_range(20000, 200001);
 				if (sp_tx_aux_dpcdwrite_bytes(0x00, 0x05,0xf0,3,pBuf) == AUX_OK)
 					break;
 				if (!count) 
@@ -2459,7 +2561,7 @@ static void sp_tx_config_audio(void)
 
 	switch (c & 0x0f) {
 	case 0x00:
-		AUD_Freq = 44.1;
+		AUD_Freq = 44;
 		break;
 	case 0x02:
 		AUD_Freq = 48;
@@ -2468,13 +2570,13 @@ static void sp_tx_config_audio(void)
 		AUD_Freq = 32;
 		break;
 	case 0x08:
-		AUD_Freq = 88.2;
+		AUD_Freq = 88;
 		break;
 	case 0x0a:
 		AUD_Freq = 96;
 		break;
 	case 0x0c:
-		AUD_Freq = 176.4;
+		AUD_Freq = 176;
 		break;
 	case 0x0e:
 		AUD_Freq = 192;
@@ -2588,6 +2690,119 @@ void QC20_process(void)
 }
 #endif
 /******************End Audio process********************/
+
+
+/* This function read tx sys sate, if state is big than 5, it means mydp interface is ok. */
+int get_tx_system_state(void)
+{
+	pr_info("%s %s: sp_tx_LT_state is %d\n", LOG_TAG, __func__, sp_tx_system_state);
+
+	return sp_tx_system_state;
+}
+
+/* This function read audio status, not necessory for anx7816 */
+int get_tx_audio_state(void)
+{
+	unchar c;
+	unchar audio_status;
+	long int audio_M_val, audio_N_val;
+
+	sp_read_reg(SP_TX_PORT0_ADDR, AUDIO_M_VID_2, &c);
+	audio_M_val = c * 0x10000;
+	sp_read_reg(SP_TX_PORT0_ADDR, AUDIO_M_VID_1, &c);
+	audio_M_val = audio_M_val + c * 0x100;
+	sp_read_reg(SP_TX_PORT0_ADDR, AUDIO_M_VID_0, &c);
+	audio_M_val = audio_M_val + c;
+
+	sp_read_reg(SP_TX_PORT0_ADDR, AUDIO_N_VID_2, &c);
+	audio_N_val = c * 0x10000;
+	sp_read_reg(SP_TX_PORT0_ADDR, AUDIO_N_VID_1, &c);
+	audio_N_val = audio_N_val + c * 0x100;
+	sp_read_reg(SP_TX_PORT0_ADDR, AUDIO_N_VID_0, &c);
+	audio_N_val = audio_N_val + c;
+
+	pr_info("%s %s: Audio M = %lu, N = %lu\n", LOG_TAG, __func__, audio_M_val, audio_N_val);
+
+	sp_read_reg(SP_TX_PORT2_ADDR, SP_AUDIO_TX_STATUS, &c);
+	audio_status = c;
+	pr_info("%s %s: Audio Status = 0x%02x\n", LOG_TAG, __func__, (unsigned int)audio_status);
+
+#if 0 
+	if ((audio_M_val == 0x05D6 || audio_M_val == 0x05D7)
+	  && (audio_status == 0x45 || audio_status == 0x46)
+	  && audio_N_val == 0x8000) {
+		pr_info("%s: audio status return 1\n", __func__);
+		return 1;
+	} else {
+		pr_info("%s: audio status return 0\n", __func__);
+		return 0;
+	}
+#else
+	return 1;
+#endif
+}
+
+/* This function read video resolution and check video(HDMI) status */
+int get_tx_video_state(void)
+{
+	unchar c;
+	unchar cl, ch;
+	unchar video_pkg_len_h, video_pkg_len_l;
+	uint n;
+	uint h_res, v_res;
+	int ret = 0;
+
+	sp_read_reg(RX_P0, HDMI_RX_HACT_LOW, &cl);
+	sp_read_reg(RX_P0, HDMI_RX_HACT_HIGH, &ch);
+	n = ch;
+	n = (n << 8) + cl;
+	h_res = n;
+
+	sp_read_reg(RX_P0, HDMI_RX_VACT_LOW, &cl);
+	sp_read_reg(RX_P0, HDMI_RX_VACT_HIGH, &ch);
+	n = ch;
+	n = (n << 8) + cl;
+	v_res = n;
+
+	pr_info("%s %s : >HDMI_RX Info<\n", LOG_TAG, __func__);
+	sp_read_reg(RX_P0, HDMI_STATUS, &c);
+	if (c & HDMI_MODE)
+		pr_info("%s %s : HDMI_RX Mode = HDMI Mode.\n", LOG_TAG, __func__);
+	else
+		pr_info("%s %s : HDMI_RX Mode = DVI Mode.\n", LOG_TAG, __func__);
+
+	sp_read_reg(RX_P0, HDMI_RX_VIDEO_STATUS_REG1, &c);
+	if (c & VIDEO_TYPE) {
+		v_res += v_res;
+	}
+	pr_info("%s %s : HDMI_RX Video Resolution = %d * %d ",
+			LOG_TAG, __func__, h_res, v_res);
+	sp_read_reg(RX_P0, HDMI_RX_VIDEO_STATUS_REG1, &c);
+	if (c & VIDEO_TYPE)
+		pr_info("%s %s : Interlace Video.\n", LOG_TAG, __func__);
+	else
+		pr_info("%s %s : Progressive Video.\n", LOG_TAG, __func__);
+
+	/* ANX FAE said register addr 7a1e/7a1f of anx7816 register mean nothing*/
+	sp_read_reg(TX_P1, VIDEO_PKG_LEN_H, &video_pkg_len_h);
+	sp_read_reg(TX_P1, VIDEO_PKG_LEN_L, &video_pkg_len_l);
+	pr_info("%s %s : HDMI_TX Video packet length h/l = 0x%x * 0x%x ",
+			LOG_TAG, __func__, video_pkg_len_h, video_pkg_len_l);
+
+	/* NAX FAE believe valid resoluton can ensure good HDMI hardware */
+	if (h_res == 1920 && v_res == 1080) {
+		pr_info("%s %s: anx7816 video status return 1, sp_tx_vo_state = %d, video package size: HByte 0x%x, LByte 0x%x\n",
+			LOG_TAG, __func__, sp_tx_vo_state, video_pkg_len_h, video_pkg_len_l);
+		ret = 0x10000|(video_pkg_len_h<<8)|video_pkg_len_l;
+	} else {
+		pr_info("%s %s: anx7816 video status return 0, sp_tx_vo_state = %d, video package size: HByte 0x%x, LByte 0x%x\n",
+			LOG_TAG, __func__, sp_tx_vo_state, video_pkg_len_h, video_pkg_len_l);
+		ret = (video_pkg_len_h<<8)|video_pkg_len_l;
+	}
+	return ret;
+
+}
+
 void slimport_initialization(void)
 {
 	#ifdef ENABLE_READ_EDID
@@ -2621,7 +2836,7 @@ void slimport_cable_monitor(void)
 				//reg_hardware_reset();
 				sp_tx_clean_state_machine(); 
 				sp_tx_set_sys_state(STATE_SP_INITIALIZED);
-				mdelay(500);
+				msleep(500);
 			}
 		}
 	}
@@ -2660,14 +2875,14 @@ void slimport_state_process (void)
 		SP_BREAK(STATE_PARSE_EDID, sp_tx_system_state);
 	#endif
 	case STATE_LINK_TRAINING:
-		slimport_link_training();		
+		slimport_link_training();
 		SP_BREAK(STATE_LINK_TRAINING, sp_tx_system_state);
 	case STATE_VIDEO_OUTPUT:
 		slimport_config_video_output();
 		SP_BREAK(STATE_VIDEO_OUTPUT, sp_tx_system_state);
 	case STATE_HDCP_AUTH:
 		if(!HDCP_REPEATER_MODE){
-			slimport_hdcp_process();	
+			slimport_hdcp_process();
 			SP_BREAK(STATE_HDCP_AUTH, sp_tx_system_state);
 		}else{
 			goto_next_system_state();
@@ -2676,12 +2891,19 @@ void slimport_state_process (void)
 		slimport_config_audio_output();
 		SP_BREAK(STATE_AUDIO_OUTPUT, sp_tx_system_state);
 	case STATE_PLAY_BACK:
-		//slimport_playback_process();	
+	#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
+		/*
+		 *Stop blocking slimport mod display handle connect
+		 *thread when HDMI video is stable
+		*/
+		slimport_complete_video_stable();
+	#endif
+		/*slimport_playback_process();*/
 		SP_BREAK(STATE_PLAY_BACK, sp_tx_system_state);
 	default:
 		break;
 	}
-	
+
 }
 /******************Start INT process********************/
 void sp_tx_int_rec(void)
@@ -2997,7 +3219,8 @@ static void sp_tx_sink_irq_int_handler(void)
 							sp_tx_clean_state_machine();
 							sp_tx_set_sys_state(STATE_LINK_TRAINING);
 						}else{
-							pr_info("%s %s : Downstream HDMI is unpluged!\n", LOG_TAG, __func__);
+							pr_warn("%s %s : Downstream HDMI is unpluged!\n",
+							LOG_TAG, __func__);
 							vbus_power_ctrl(0);
 							reg_hardware_reset();
 							sp_tx_set_sys_state(STATE_SP_INITIALIZED);
@@ -3430,7 +3653,7 @@ static void hdmi_rx_hdcp_error_int(void)
 		hdmi_rx_mute_audio(1);
 		hdmi_rx_mute_video(1);
 		hdmi_rx_set_hpd(0);
-		mdelay(10);
+		usleep_range(10000, 10001);
 		hdmi_rx_set_hpd(1);
 	}else
 		count++;
@@ -3723,7 +3946,8 @@ void hdmi_rx_show_video_info(void)
     {
         v_res += v_res;
     }       
-    pr_info("%s %s : HDMI_RX Video Resolution = %d * %d ", LOG_TAG, __func__,h_res,v_res);
+	pr_debug("%s %s : HDMI_RX Video Resolution = %d * %d ",
+				LOG_TAG, __func__, h_res, v_res);
     sp_read_reg(RX_P0,HDMI_RX_VIDEO_STATUS_REG1, &c); 
     if(c & VIDEO_TYPE)
         pr_info("Interlace Video.\n");
@@ -3772,7 +3996,7 @@ void hdmi_rx_show_video_info(void)
     sp_read_reg(RX_P1,HDMI_RX_AVI_DATA00_REG, &c);  
     c &= 0x60;
     if(c == 0x20)        
-        pr_info("YCbCr4:2:2 .\n");
+	pr_info("YCbCr4:2:2 .\n");
     else if(c == 0x40)   
         pr_info("YCbCr4:4:4 .\n");
     else if(c == 0x00)   
@@ -3784,9 +4008,10 @@ void hdmi_rx_show_video_info(void)
 
     sp_read_reg(RX_P1,HDMI_RX_HDCP_STATUS_REG, &c); 
     if(c & AUTH_EN)
-        pr_info("%s %s : Authentication is attempted.\n", LOG_TAG, __func__);
+	pr_debug("%s %s : Authentication is attempted.\n", LOG_TAG, __func__);
     else
-        pr_info("%s %s : Authentication is not attempted.\n", LOG_TAG, __func__);
+	pr_debug("%s %s : Authentication is not attempted.\n",
+					LOG_TAG, __func__);
 
     for(cl=0;cl<20;cl++)
     {
@@ -3794,7 +4019,7 @@ void hdmi_rx_show_video_info(void)
         if(c & DECRYPT_EN)
             break;
         else
-            mdelay(10);
+		usleep_range(10000, 10001);
     }
     if(cl < 20)
         pr_info("%s %s : Decryption is active.\n", LOG_TAG, __func__);
@@ -3838,7 +4063,7 @@ void clean_system_status(void)
 					hdmi_rx_set_hpd(0);
 					pr_info("%s %s : hdmi_rx_set_hpd 0 !\n", LOG_TAG, __func__);
 					hdmi_rx_set_termination(0);
-					mdelay(50);
+					msleep(50);
 			}
 		}
 		if(HDCP_state != HDCP_CAPABLE_CHECK)
@@ -3966,7 +4191,7 @@ void slimport_hdcp_repeater_reauth(void) /* A patch for HDCP repeater mode*/
 			//debug_puts("Upstream HDMI HDCP request!\n");
 			sp_read_reg(TX_P0,TX_HDCP_CTRL0, &hdcp_ctrl);
 			if ((hdcp_ctrl & HARD_AUTH_EN) == 0) {
-				pr_info("Repeater Mode: Enable HW HDCP\n");
+				pr_debug("Repeater Mode: Enable HW HDCP\n");
 				assisted_HDCP_repeater = HDCP_ERROR;
 				
 			} else {
@@ -3992,7 +4217,7 @@ void slimport_hdcp_repeater_reauth(void) /* A patch for HDCP repeater mode*/
 		
 		if(assisted_HDCP_repeater == HDCP_ERROR){
 			sp_tx_clean_hdcp_status();
-			mdelay(50);
+			msleep(50);
 			/*Clear HDCP AUTH interrupt*/
 			sp_write_reg_or(TX_P2, SP_COMMON_INT_STATUS1+1, HDCP_AUTH_DONE);
 			sp_tx_hw_hdcp_enable();

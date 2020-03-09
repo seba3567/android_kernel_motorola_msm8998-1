@@ -15,11 +15,13 @@
 
 #include <video/msm_dba.h>
 #include <linux/switch.h>
+#include <linux/of_platform.h>
 
 #include "mdss_dba_utils.h"
 #include "mdss_hdmi_edid.h"
 #include "mdss_cec_core.h"
 #include "mdss_fb.h"
+#include "mdss_dsi.h"
 
 /* standard cec buf size + 1 byte specific to driver */
 #define CEC_BUF_SIZE    (MAX_CEC_FRAME_SIZE + 1)
@@ -30,10 +32,9 @@
 struct mdss_dba_utils_data {
 	struct msm_dba_ops ops;
 	bool hpd_state;
-	bool audio_switch_registered;
-	bool display_switch_registered;
-	struct switch_dev sdev_display;
-	struct switch_dev sdev_audio;
+	struct msm_ext_disp_init_data ext_audio_data;
+	struct platform_device *pdev;
+	struct platform_device *ext_pdev;
 	struct kobject *kobj;
 	struct mdss_panel_info *pinfo;
 	void *dba_data;
@@ -88,51 +89,35 @@ end:
 static void mdss_dba_utils_notify_display(
 	struct mdss_dba_utils_data *udata, int val)
 {
-	int state = 0;
-
 	if (!udata) {
 		pr_err("invalid input\n");
 		return;
 	}
 
-	if (!udata->display_switch_registered) {
-		pr_err("display switch not registered\n");
-		return;
-	}
-
-	state = udata->sdev_display.state;
-
-	switch_set_state(&udata->sdev_display, val);
-
-	pr_debug("cable state %s %d\n",
-		udata->sdev_display.state == state ?
-		"is same" : "switched to",
-		udata->sdev_display.state);
+	if (udata->ext_audio_data.intf_ops.hpd) {
+		u32 flags = 0;
+		flags |= MSM_EXT_DISP_HPD_ASYNC_VIDEO;
+		if (!hdmi_edid_is_dvi_mode(udata->edid_data))
+			flags |= MSM_EXT_DISP_HPD_AUDIO;
+		udata->ext_audio_data.intf_ops.hpd(udata->ext_pdev,
+				udata->ext_audio_data.type, val, flags);
+	} else
+		pr_err("%s: did not register with ext_display", __func__);
 }
 
 static void mdss_dba_utils_notify_audio(
 	struct mdss_dba_utils_data *udata, int val)
 {
-	int state = 0;
-
 	if (!udata) {
 		pr_err("invalid input\n");
 		return;
 	}
 
-	if (!udata->audio_switch_registered) {
-		pr_err("audio switch not registered\n");
-		return;
-	}
+	if (udata->ext_audio_data.intf_ops.notify)
+		udata->ext_audio_data.intf_ops.notify(udata->ext_pdev, val);
+	else
+		pr_err("%s: did not register with ext_display", __func__);
 
-	state = udata->sdev_audio.state;
-
-	switch_set_state(&udata->sdev_audio, val);
-
-	pr_debug("audio state %s %d\n",
-		udata->sdev_audio.state == state ?
-		"is same" : "switched to",
-		udata->sdev_audio.state);
 }
 
 static ssize_t mdss_dba_utils_sysfs_rda_connected(struct device *dev,
@@ -364,6 +349,8 @@ static void mdss_dba_utils_dba_cb(void *data, enum msm_dba_callback_event event)
 			}
 		}
 
+		udata->hpd_state = true;
+
 		if (pluggable) {
 			mdss_dba_utils_notify_display(udata, 1);
 			if (udata->support_audio)
@@ -372,7 +359,6 @@ static void mdss_dba_utils_dba_cb(void *data, enum msm_dba_callback_event event)
 			mdss_dba_utils_video_on(udata, udata->pinfo);
 		}
 
-		udata->hpd_state = true;
 		break;
 
 	case MSM_DBA_CB_HPD_DISCONNECT:
@@ -472,44 +458,11 @@ static int mdss_dba_utils_send_cec_msg(void *data, struct cec_msg *msg)
 	return ret;
 }
 
-static int mdss_dba_utils_init_switch_dev(struct mdss_dba_utils_data *udata,
-	u32 fb_node)
-{
-	int rc = -EINVAL, ret;
-
-	if (!udata) {
-		pr_err("invalid input\n");
-		goto end;
-	}
-
-	/* create switch device to update display modules */
-	udata->sdev_display.name = "hdmi";
-	rc = switch_dev_register(&udata->sdev_display);
-	if (rc) {
-		pr_err("display switch registration failed\n");
-		goto end;
-	}
-
-	udata->display_switch_registered = true;
-
-	/* create switch device to update audio modules */
-	udata->sdev_audio.name = "hdmi_audio";
-	ret = switch_dev_register(&udata->sdev_audio);
-	if (ret) {
-		pr_err("audio switch registration failed\n");
-		goto end;
-	}
-
-	udata->audio_switch_registered = true;
-end:
-	return rc;
-}
-
 static int mdss_dba_get_vic_panel_info(struct mdss_dba_utils_data *udata,
 					struct mdss_panel_info *pinfo)
 {
-	struct msm_hdmi_mode_timing_info timing;
-	struct hdmi_util_ds_data ds_data;
+	struct msm_hdmi_mode_timing_info timing = {0};
+	struct hdmi_util_ds_data ds_data = {0};
 	u32 h_total, v_total, vic = 0;
 
 	if (!udata || !pinfo) {
@@ -543,6 +496,96 @@ static int mdss_dba_get_vic_panel_info(struct mdss_dba_utils_data *udata,
 
 	return vic;
 }
+
+static int mdss_dba_audio_info_setup(struct platform_device *pdev,
+			struct msm_ext_disp_audio_setup_params *params)
+{
+	int ret = 0;
+
+	pr_info("%s+\n", __func__);
+	return ret;
+}
+
+static int mdss_dba_get_audio_edid_blk(struct platform_device *pdev,
+			struct msm_ext_disp_audio_edid_blk *blk)
+{
+	int ret = 0;
+
+	pr_info("%s+\n", __func__);
+	return ret;
+}
+
+static int mdss_dba_get_cable_status(struct platform_device *pdev, u32 vote)
+{
+	int ret = 0;
+
+	pr_info("%s+\n", __func__);
+	return ret;
+}
+
+static int mdss_dba_init_ext_disp(struct mdss_dba_utils_data *udata)
+{
+	int ret = 0;
+	struct device_node *pd_np;
+	struct platform_device *pdev;
+	const char *phandle = "qcom,msm_ext_disp";
+
+	if (!udata) {
+		pr_err("%s: invalid input\n", __func__);
+		ret = -ENODEV;
+		goto end;
+	}
+
+	pr_debug("%s+.\n", __func__);
+
+	udata->ext_audio_data.type = EXT_DISPLAY_TYPE_DBA;
+	udata->ext_audio_data.kobj = udata->kobj;
+	udata->ext_audio_data.pdev = udata->pdev;
+	udata->ext_audio_data.codec_ops.audio_info_setup =
+					mdss_dba_audio_info_setup;
+	udata->ext_audio_data.codec_ops.get_audio_edid_blk =
+					mdss_dba_get_audio_edid_blk;
+	udata->ext_audio_data.codec_ops.cable_status =
+					mdss_dba_get_cable_status;
+
+	pdev = udata->pdev;
+	if (!pdev) {
+		pr_err("%s invalid pdev\n", __func__);
+		ret = -ENODEV;
+		goto end;
+	}
+
+	if (!pdev->dev.of_node) {
+		pr_err("%s cannot find mdss_dba dev.of_node\n", __func__);
+		ret = -ENODEV;
+		goto end;
+	}
+
+	pd_np = of_parse_phandle(pdev->dev.of_node, phandle, 0);
+	if (!pd_np) {
+		pr_err("%s cannot find %s dev\n", __func__, phandle);
+		ret = -ENODEV;
+		goto end;
+	}
+
+	udata->ext_pdev = of_find_device_by_node(pd_np);
+	if (!udata->ext_pdev) {
+		pr_err("%s cannot find %s pdev\n", __func__, phandle);
+		ret = -ENODEV;
+		goto end;
+	}
+
+	ret = msm_ext_disp_register_intf(udata->ext_pdev,
+				&udata->ext_audio_data);
+	if (ret)
+		pr_err("%s: failed to register disp\n", __func__);
+
+end:
+	return ret;
+}
+
+
+
 
 /**
  * mdss_dba_utils_video_on() - Allow clients to switch on the video
@@ -649,6 +692,112 @@ void mdss_dba_utils_hdcp_enable(void *data, bool enable)
 }
 
 /**
+ * mdss_dba_utils_reconfigure_dsi() - Allow clients to perform DSI
+ *    reconfiguration at a much lower level than HDMI requires.
+ * @data: DBA utils instance which was allocated during registration
+ * @pinfo: detailed panel information like x, y, porch values etc
+ *
+ * This API is used to reconfigure the DSI data structures in preperation
+ * for unblanking a new panel.
+ *
+ * Return: returns the result of the dsi panel timing switch operation.
+ */
+int mdss_dba_utils_reconfigure_dsi(void *data, struct mdss_panel_info *pinfo)
+{
+	struct mdss_dba_utils_data *ud = data;
+	struct mdss_dsi_ctrl_pdata *ctrl;
+	struct mdss_panel_data *panel_data;
+	struct msm_dba_dsi_cfg dsi_config;
+	struct dsi_panel_timing pt;
+	int ret = 0;
+
+	if (!ud || !pinfo) {
+		pr_err("invalid input\n");
+		ret = -EINVAL;
+		goto exit;
+	}
+
+	pr_debug("%s+\n", __func__);
+
+	panel_data = container_of(pinfo, struct mdss_panel_data, panel_info);
+
+	ctrl = container_of(panel_data, struct mdss_dsi_ctrl_pdata, panel_data);
+
+	if (ud->ops.get_dsi_config) {
+		ret = ud->ops.get_dsi_config(ud->dba_data, &dsi_config);
+		if (ret) {
+			pr_err("%s: get_dsi_config not supported\n", __func__);
+			goto exit;
+		}
+	} else {
+		pr_err("%s: get_dsi_config not implemented\n", __func__);
+		ret = -ENODEV;
+		goto exit;
+	}
+
+	pinfo->physical_width = dsi_config.physical_width_dim;
+	pinfo->physical_height = dsi_config.physical_length_dim;
+	pinfo->bpp = dsi_config.bpp;
+	pinfo->mipi.mode = dsi_config.mode;
+	pinfo->type = pinfo->mipi.mode == DSI_VIDEO_MODE ? MIPI_VIDEO_PANEL :
+		MIPI_CMD_PANEL;
+	pinfo->mipi.pixel_packing = dsi_config.pixel_packing;
+	if (mdss_panel_get_dst_fmt(pinfo->bpp, pinfo->mipi.mode,
+	    pinfo->mipi.pixel_packing, &(pinfo->mipi.dst_format))) {
+		pr_debug("%s: problem determining dst format. Set Default\n",
+			__func__);
+		pinfo->mipi.dst_format = DSI_VIDEO_DST_FORMAT_RGB888;
+	}
+	/* TODO: pinfo->lcdc.underflow_clr */
+	/* TODO: pinfo->lcdc.border_clr */
+	/* TODO: pinfo->panel_orientation */
+	/* TODO: pinfo->mipi.interleave_mode */
+	/* TODO: pinfo->mipi.vsync_enable */
+	pinfo->mipi.traffic_mode = dsi_config.traffic_mode;
+	pinfo->mipi.vc = dsi_config.virtual_channel_id;
+	pinfo->mipi.rgb_swap = dsi_config.color_order;
+	/* TODO: pinfo->mipi.rx_eot_ignore */
+	pinfo->mipi.tx_eot_append = dsi_config.eot_mode;
+
+	pinfo->mipi.data_lane0 = dsi_config.num_lanes > 0;
+	pinfo->mipi.data_lane1 = dsi_config.num_lanes > 1;
+	pinfo->mipi.data_lane2 = dsi_config.num_lanes > 2;
+	pinfo->mipi.data_lane3 = dsi_config.num_lanes > 3;
+
+	memset(&pt, 0, sizeof(pt));
+	pt.timing.xres = dsi_config.width;
+	pt.timing.yres = dsi_config.height;
+	pt.timing.h_front_porch = dsi_config.horizontal_front_porch;
+	pt.timing.h_back_porch = dsi_config.horizontal_back_porch;
+	pt.timing.h_pulse_width = dsi_config.horizontal_pulse_width;
+	pt.timing.hsync_skew = dsi_config.horizontal_sync_skew;
+	pt.timing.v_back_porch = dsi_config.vertical_back_porch;
+	pt.timing.v_front_porch = dsi_config.vertical_front_porch;
+	pt.timing.v_pulse_width = dsi_config.vertical_pulse_width;
+	pt.timing.border_left = dsi_config.horizontal_left_border;
+	pt.timing.border_right = dsi_config.horizontal_right_border;
+	pt.timing.border_top = dsi_config.vertical_top_border;
+	pt.timing.border_bottom = dsi_config.vertical_bottom_border;
+	pt.timing.frame_rate = dsi_config.framerate;
+	pt.timing.clk_rate = dsi_config.clockrate * dsi_config.num_lanes;
+	pt.t_clk_pre = dsi_config.t_clk_pre;
+	pt.t_clk_post = dsi_config.t_clk_post;
+
+	pinfo->mipi.dsi_pclk_rate = pt.timing.clk_rate;
+	pinfo->panel_max_fps = mdss_panel_get_framerate(pinfo);
+	pinfo->panel_max_vtotal = mdss_panel_get_vtotal(pinfo);
+
+	do_div(pinfo->mipi.dsi_pclk_rate, dsi_config.bpp);
+
+	ret = mdss_dsi_panel_timing_switch(ctrl, &pt.timing);
+	if (ret)
+		pr_err("%s: failed to switch panel timing\n", __func__);
+
+exit:
+	return ret;
+}
+
+/**
  * mdss_dba_utils_init() - Allow clients to register with DBA utils
  * @uid: Initialization data for registration.
  *
@@ -716,6 +865,7 @@ void *mdss_dba_utils_init(struct mdss_dba_utils_init_data *uid)
 	/* keep init data for future use */
 	udata->kobj = uid->kobj;
 	udata->pinfo = uid->pinfo;
+	udata->pdev = uid->pdev;
 
 	/* Initialize EDID feature */
 	edid_init_data.kobj = uid->kobj;
@@ -733,10 +883,15 @@ void *mdss_dba_utils_init(struct mdss_dba_utils_init_data *uid)
 
 	/* update edid data to retrieve it back in edid parser */
 	if (uid->pinfo) {
+		u32 default_resolution = DEFAULT_VIDEO_RESOLUTION;
 		uid->pinfo->edid_data = udata->edid_data;
+
+		if (udata->ops.get_default_resolution)
+			default_resolution = udata->ops.get_default_resolution(
+				udata->dba_data);
 		/* Initialize to default resolution */
 		hdmi_edid_set_video_resolution(uid->pinfo->edid_data,
-					DEFAULT_VIDEO_RESOLUTION, true);
+					default_resolution, true);
 	}
 
 	/* get edid buffer from edid parser */
@@ -777,11 +932,10 @@ void *mdss_dba_utils_init(struct mdss_dba_utils_init_data *uid)
 			if (udata->ops.check_hpd)
 				udata->ops.check_hpd(udata->dba_data, 0);
 		} else {
-			/* register display and audio switch devices */
-			ret = mdss_dba_utils_init_switch_dev(udata,
-				uid->fb_node);
+			ret = mdss_dba_init_ext_disp(udata);
 			if (ret) {
-				pr_err("switch dev registration failed\n");
+				pr_err("%s: fail to register with ext_disp. Ret = %d\n",
+				__func__, ret);
 				goto error;
 			}
 		}
@@ -820,12 +974,6 @@ void mdss_dba_utils_deinit(void *data)
 		udata->pinfo->edid_data = NULL;
 		udata->pinfo->is_cec_supported = false;
 	}
-
-	if (udata->audio_switch_registered)
-		switch_dev_unregister(&udata->sdev_audio);
-
-	if (udata->display_switch_registered)
-		switch_dev_unregister(&udata->sdev_display);
 
 	if (udata->kobj)
 		mdss_dba_utils_sysfs_remove(udata->kobj);

@@ -22,6 +22,7 @@
 
 #define MAX_SWITCH_NAME_SIZE        5
 #define HDMI_GEN_PKT_CTRL_CLR_MASK  0x7
+#define WAIT_HDMI_PANEL_OFF 5000
 
 enum hdmi_tx_io_type {
 	HDMI_TX_CORE_IO,
@@ -71,6 +72,11 @@ struct hdmi_tx_ctrl {
 	struct mdss_util_intf *mdss_util;
 	struct msm_hdmi_mode_timing_info timing;
 	struct hdmi_tx_pinctrl pin_res;
+
+#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
+	struct mutex mutex_hpd;
+	struct completion hdmi_panel_off;
+#endif
 	struct mutex mutex;
 	struct mutex tx_lock;
 	struct list_head cable_notify_handlers;

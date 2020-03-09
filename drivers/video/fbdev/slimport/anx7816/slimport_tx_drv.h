@@ -26,6 +26,12 @@
 //#define CEC_PHYCISAL_ADDRESS_INSERT
 //#define CEC_DBG_MSG_ENABLED
 
+#define SP_TX_PORT0_ADDR 0x70
+#define SP_TX_PORT1_ADDR 0x74
+#define SP_TX_PORT2_ADDR 0x72
+#define MIPI_RX_PORT1_ADDR 0x7A
+
+
 #ifdef DEMO_4K_2K
 #define FW_VERSION 0xA4
 #else
@@ -290,6 +296,10 @@ bool sp_tx_edid_read(unchar *pBuf);
 void check_edid_data(unchar *pblock_buf);
 #endif
 
+int get_tx_system_state(void);
+int get_tx_audio_state(void);
+int get_tx_video_state(void);
+
 bool slimport_chip_detect(void);
 void slimport_chip_initial(void);
 void slimport_main_process(void);
@@ -310,8 +320,7 @@ unchar slimport_hdcp_cap_check(void);
 unchar sp_tx_cur_cable_type(void);
 
 void sp_tx_initialization(void);
-unchar sp_tx_cur_bw(void);
-void sp_tx_set_bw(unchar bw);
+unchar sp_rx_cur_bw(void);
 
 /* ***************************************************************** */
 /* Functions protoype for slimport_rx anx7730 */
