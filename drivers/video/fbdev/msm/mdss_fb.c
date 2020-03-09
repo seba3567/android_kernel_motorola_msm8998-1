@@ -1009,14 +1009,6 @@ static ssize_t panel_supplier_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%s\n", pinfo->panel_supplier);
 }
 
-static ssize_t panel_vendor_id_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct mdss_panel_info *pinfo = get_panel_info(dev);
-
-	return snprintf(buf, PAGE_SIZE, "%s\n", pinfo->panel_vendor_id);
-}
-
 static ssize_t panel_man_id_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
 {
@@ -1053,8 +1045,6 @@ static DEVICE_ATTR(panel_supplier, S_IRUGO,
 					panel_supplier_show, NULL);
 static DEVICE_ATTR(controller_drv_ver, S_IRUGO,
 					panel_controller_drv_ver_show, NULL);
-static DEVICE_ATTR(panel_vendor_id, S_IRUGO,
-					panel_vendor_id_show, NULL);
 static struct attribute *panel_id_attrs[] = {
 	&dev_attr_panel_name.attr,
 	&dev_attr_panel_ver.attr,
@@ -1062,7 +1052,6 @@ static struct attribute *panel_id_attrs[] = {
 	&dev_attr_man_id.attr,
 	&dev_attr_controller_ver.attr,
 	&dev_attr_controller_drv_ver.attr,
-	&dev_attr_panel_vendor_id.attr,
 	NULL,
 };
 
