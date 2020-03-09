@@ -2208,6 +2208,8 @@ void SP_TX_Config_Audio_I2S(struct AudioFormat *bAudioFormat)
 }
 void SP_TX_Config_Audio_Slimbus(struct AudioFormat *bAudioFormat)
 {
+//TO DO
+	bAudioFormat = bAudioFormat;
 }
 
 
