@@ -737,8 +737,6 @@
 
 #define FW_VER_REG 0xB7
 
-#define VIDEO_PKG_LEN_H 0x1E
-#define VIDEO_PKG_LEN_L 0x1F
 
 /***************************************************************/
 /*Definition of DPCD*/
