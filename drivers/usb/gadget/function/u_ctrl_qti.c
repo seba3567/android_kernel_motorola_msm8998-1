@@ -332,7 +332,7 @@ static int qti_ctrl_open(struct inode *ip, struct file *fp)
 		port->name, port->index);
 
 	if (qti_ctrl_lock(&port->open_excl)) {
-		pr_err("Already opened\n");
+		pr_debug("%s: Already opened\n", __func__);
 		return -EBUSY;
 	}
 
