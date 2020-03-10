@@ -13,7 +13,7 @@
 #include "sdm630-moto-common.dtsi"
 #include "sdm660-external-codec.dtsi"
 #include "sdm660-camera-sensor-mot-payton.dtsi"
-#include "dsi-panel-mot-tianma-520-1080p-vid.dtsi"
+/* #include "dsi-panel-mot-tianma-520-1080p-vid.dtsi" */
 #include "dsi-panel-mot-boe-520-1080p-vid.dtsi"
 / {
         model = "Payton";
@@ -146,7 +146,7 @@
 };
 
 &mdss_dsi0 {
-	qcom,dsi-pref-prim-pan = <&mot_tianma_520_1080p_vid_v0>;
+	qcom,dsi-pref-prim-pan = <&mot_boe_520_1080p_vid_v0>;
 	pinctrl-names = "mdss_default", "mdss_sleep";
 	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
 	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
