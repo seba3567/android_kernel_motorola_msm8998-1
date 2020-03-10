@@ -857,11 +857,6 @@ ssize_t sp_irq_enable_store(struct device *dev,
 static ssize_t tx_system_status_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	int link_status = get_tx_system_state();
-	/* Fix me! Force video stable complete when factory mode. */
-	/* Need add video playing so we can get video stable when Edsel connected.*/
-#ifdef CONFIG_SLIMPORT_DYNAMIC_HPD
-	slimport_complete_video_stable();
-#endif
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", link_status);
 }
@@ -1731,7 +1726,7 @@ static int slimport_mod_display_handle_connect(void *data)
 	*/
 	retries = 2;
 
-	pr_info("%s: Start to wait video stable\n", __func__);
+	pr_debug("%s: Start to wait video stable\n", __func__);
 
 	while (!wait_for_completion_timeout(&anx7816->video_stable_wait,
 		msecs_to_jiffies(WAIT_VIDEO_STABLE_TIMEOUT)) && retries) {
@@ -1745,7 +1740,7 @@ static int slimport_mod_display_handle_connect(void *data)
 		pr_warn("%s: Video is not stable after waiting %ds.\n",
 			__func__, 2 * WAIT_VIDEO_STABLE_TIMEOUT / 1000);
 #endif
-	pr_info("%s-\n", __func__);
+	pr_debug("%s-\n", __func__);
 
 	return ret;
 }
@@ -1775,7 +1770,7 @@ static int slimport_mod_display_handle_disconnect(void *data)
 	struct anx7816_data *anx7816;
 	int retries = 2;
 
-	pr_info("%s+\n", __func__);
+	pr_debug("%s+\n", __func__);
 
 	anx7816 = (struct anx7816_data *)data;
 
@@ -1786,7 +1781,7 @@ static int slimport_mod_display_handle_disconnect(void *data)
 	while (atomic_read(&anx7816->slimport_connected) &&
 			!wait_for_completion_timeout(&anx7816->connect_wait,
 			msecs_to_jiffies(1000)) && retries) {
-		pr_info("%s: Slimport not disconnected... Retries left: %d\n",
+		pr_debug("%s: Slimport not disconnected... Retries left: %d\n",
 			__func__, retries);
 		retries--;
 	}
@@ -1807,7 +1802,7 @@ static int slimport_mod_display_handle_disconnect(void *data)
 	/*Block here until HDMI panel off*/
 	msm_hdmi_sync_slimport(anx7816->pdata->hdmi_pdev);
 #endif
-	pr_info("%s-\n", __func__);
+	pr_debug("%s-\n", __func__);
 	return 0;
 }
 
