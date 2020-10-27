@@ -379,4 +379,12 @@ config PAYTON_DTB
          Only include Payton specific DTBs to limit the number that
          get built during kernel compilation.
 
+config EVERT_DTB
+	depends on ARCH_QCOM
+	default n
+	bool "Evert DTBs"
+	help
+	  Only include Evert specific DTBs to limit the number that
+	  get built during kernel compilation.
+
 endmenu

@@ -4,6 +4,14 @@ ifeq ($(CONFIG_PAYTON_DTB),y)
 dtb-$(CONFIG_ARCH_SDM630) += sdm630-payton-p2b.dtb
 endif
 
+ifeq ($(CONFIG_EVERT_DTB),y)
+dtb-$(CONFIG_ARCH_SDM630) += sdm630-evert-evt1.dtb \
+	sdm630-evert-dvt1a.dtb \
+	sdm630-evert-dvt1b.dtb \
+	sdm630-evert-dvt2.dtb \
+	sdm630-evert-pvt1.dtb
+endif
+
 #dtb-$(CONFIG_ARCH_QCOM)	+= apq8016-sbc.dtb msm8916-mtp.dtb
 #dtb-$(CONFIG_ARCH_QCOM)	+= msm8996-mtp.dtb
 #dtb-$(CONFIG_ARCH_QCOM)	+= apq8096-db820c.dtb
